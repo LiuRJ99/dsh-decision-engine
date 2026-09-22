@@ -1,12 +1,17 @@
-# Build artifacts, not sources. `lib/` is rebuilt by `npm run build`; commit it
-# only when publishing a git-hosted install that cannot run a build.
+# Dependencies are never committed.
 node_modules/
-lib/
-*.tsbuildinfo
-
-# pnpm
 .pnpm-store/
 .npmrc.local
 
-# Implementation report for this project
+# Build scratch.
+*.tsbuildinfo
+
+# `lib/` IS committed, matching the other DSH plugins in this workspace
+# (dsh-computer-use, dsh-tool-lazy-gate): a git-hosted install and a release
+# tarball both need a runnable entry, and pnpm >= 10 refuses to run a
+# dependency's build script. `npm run build` still regenerates it from `src/`,
+# and CI can check the committed artifacts are current.
+#
+# The implementation report for this project is a session artifact, not part of
+# the plugin.
 实施报告.md

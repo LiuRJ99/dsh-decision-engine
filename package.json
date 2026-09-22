@@ -1,7 +1,6 @@
 {
   "name": "dsh-decision-engine",
   "version": "0.1.0",
-  "private": true,
   "description": "Model-agnostic low-latency decision layer for DeepSeek Harness (DSH): a Decision Engine with pluggable Decision Providers, a finite-candidate decision protocol, and Browser / Computer / Custom environment adapters. Laya is the first provider, not the architecture.",
   "license": "MIT",
   "author": "LiuRJ99",
@@ -40,8 +39,7 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE",
-    "skills"
+    "LICENSE"
   ],
   "dsh": {
     "bundle": {
@@ -97,5 +95,16 @@
     "browser",
     "computer-use",
     "laya"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LiuRJ99/dsh-decision-engine.git"
+  },
+  "homepage": "https://github.com/LiuRJ99/dsh-decision-engine#readme",
+  "bugs": {
+    "url": "https://github.com/LiuRJ99/dsh-decision-engine/issues"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
 }

@@ -42,13 +42,24 @@ Three invariants are enforced by tests, not by convention
 ## Install
 
 ```bash
+# from a pinned Git tag (the workspace's standard source form)
+dsh plugin --profile web-candidate add github:LiuRJ99/dsh-decision-engine#v0.1.0
+
+# or from a local checkout / release tarball
 dsh plugin --profile web-candidate add /path/to/dsh-decision-engine
+
 dsh --profile web-candidate --dump-config      # verify, then promote
 ```
 
 The package declares `dsh.bundle.patch` → `cordis.patch.yml`, which inserts one
 host-plane row. The single `decision_decide` tool and the `decision-control`
 skill are registered by that row.
+
+`lib/` is **committed**, matching the other DSH plugins in this workspace: a
+git-hosted install receives a runnable entry without a build step, because
+pnpm ≥ 10 refuses to run a dependency's build script. `npm run build`
+regenerates it from `src/` byte-for-byte, so the committed artifacts can be
+checked against the sources.
 
 `@receptron/laya` is an **optional** peer: it is imported dynamically. Without
 it the plugin still loads and the provider reports `degraded`; decisions fail
