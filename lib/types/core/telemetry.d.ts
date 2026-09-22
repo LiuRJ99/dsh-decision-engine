@@ -37,6 +37,8 @@ export interface DecisionTelemetry {
     candidateCount?: number;
     /** Selected candidate id, when the call succeeded. */
     selected?: string;
+    /** Input tokens the provider reported, when it reported any. */
+    inputTokens?: number;
     /** Confidence value, when the provider produced one. */
     confidence?: number;
     /** What that confidence number is (`normalized` / `provider_raw` / `unavailable`). */

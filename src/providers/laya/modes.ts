@@ -337,7 +337,14 @@ function scoreOf(ranking: DecisionRankEntry[], selected: string): number | undef
 /** Assemble the protocol result from a translated answer + metadata. */
 export function toResult(
   translated: TranslatedAnswer,
-  options: { providerId: string; mode: DecisionMode; latencyMs: number; includeDebug: boolean },
+  options: {
+    providerId: string
+    mode: DecisionMode
+    latencyMs: number
+    includeDebug: boolean
+    /** Input tokens the SDK reported for this call, when it reported them. */
+    inputTokens?: number
+  },
 ): DecisionResult {
   const debug = {
     ...options.includeDebug ? { raw: translated.raw } : {},
@@ -359,6 +366,10 @@ export function toResult(
     ...translated.confidence === undefined ? {} : { confidence: translated.confidence },
     confidenceKind,
     latencyMs: options.latencyMs,
+    // Token accounting belongs to the protocol, not to provider-private stats:
+    // without it an integrator reaches into `runtime.stats` to count tokens,
+    // which couples it to this provider's internals.
+    ...options.inputTokens === undefined ? {} : { usage: { inputTokens: options.inputTokens } },
     ...hasDebug ? { debug } : {},
   }
 }

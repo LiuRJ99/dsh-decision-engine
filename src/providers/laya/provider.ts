@@ -94,6 +94,7 @@ export class LayaDecisionProvider implements DecisionProvider {
       mode: validated.mode,
       latencyMs,
       includeDebug: context?.debug === true,
+      ...result.usage?.input_tokens === undefined ? {} : { inputTokens: result.usage.input_tokens },
     })
   }
 

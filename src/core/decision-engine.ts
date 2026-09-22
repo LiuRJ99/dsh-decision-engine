@@ -230,6 +230,7 @@ export class DecisionEngine {
         ...result.selected === undefined ? {} : { selected: result.selected },
         ...result.confidence === undefined ? {} : { confidence: result.confidence },
         ...result.confidenceKind === undefined ? {} : { confidenceKind: result.confidenceKind },
+        ...result.usage?.inputTokens === undefined ? {} : { inputTokens: result.usage.inputTokens },
         ...options.environment === undefined ? {} : { environment: options.environment },
         ...options.step === undefined ? {} : { step: options.step },
         timings: {

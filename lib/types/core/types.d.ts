@@ -119,7 +119,15 @@ export declare function isDecisionConfidenceKind(value: unknown): value is Decis
  * model behind it.
  */
 export interface DecisionResult {
-    /** Id of the provider that produced this result. */
+    /**
+     * Id of the provider that answered.
+     *
+     * A provider may override this from its own return value to name the **arm**
+     * that actually answered — a composite provider (say one that tries a model
+     * and falls back to local rules) can report `laya` vs `rules` instead of the
+     * single id it is registered under. Omitted, the engine stamps the registered
+     * provider id. The id is descriptive only: routing already happened.
+     */
     provider: string;
     /** Capability that was actually exercised (equals the request mode). */
     mode: DecisionMode;
@@ -144,8 +152,26 @@ export interface DecisionResult {
     confidenceKind?: DecisionConfidenceKind;
     /** Wall-clock time spent inside the provider, in milliseconds. */
     latencyMs: number;
+    /**
+     * Resource usage, when the provider can report it.
+     *
+     * Part of the protocol rather than provider-private detail because every
+     * integrator ends up accounting for the model it calls; without this field
+     * they reach into a provider's internal statistics, which is exactly the
+     * coupling the provider boundary exists to prevent.
+     */
+    usage?: DecisionUsage;
     /** Provider-specific raw detail, present only when the request asked for debug output. */
     debug?: DecisionResultDebug;
+}
+/** What one decision cost, in the units the provider can measure. */
+export interface DecisionUsage {
+    /** Input tokens billed or consumed, when the provider is a language model. */
+    inputTokens?: number;
+    /** Output tokens, when the provider distinguishes them. */
+    outputTokens?: number;
+    /** Provider-specific counters, for a provider whose cost model has no tokens. */
+    metrics?: Record<string, number>;
 }
 /** Build a result with the protocol fields every provider must supply. */
 export declare function createDecisionResult(init: Pick<DecisionResult, 'provider' | 'mode' | 'latencyMs'> & {
@@ -153,6 +179,7 @@ export declare function createDecisionResult(init: Pick<DecisionResult, 'provide
     ranking?: DecisionRankEntry[] | undefined;
     confidence?: number | undefined;
     confidenceKind?: DecisionConfidenceKind | undefined;
+    usage?: DecisionUsage | undefined;
     debug?: DecisionResultDebug | undefined;
 }): DecisionResult;
 /**

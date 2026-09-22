@@ -96,6 +96,35 @@ export declare class CustomEnvironmentAdapter<State = unknown> implements Enviro
     isDone(observation: Observation, objective: Objective): Promise<boolean> | boolean;
     /** The environment state seen by the last successful observation. */
     get lastState(): State | undefined;
+    /**
+     * Run one whole decision against this environment, serialized.
+     *
+     * `buildDecisionRequest` records the offered candidates on the instance and
+     * `mapDecision`/`execute` read them back, so two overlapping calls on ONE
+     * adapter leave the earlier request unmappable — a valid decision then fails
+     * with `unknown_candidate`, which reads like a bug rather than a concurrency
+     * artifact. This method holds the four protocol steps together **and runs them
+     * one at a time per instance**, so a caller that shares an adapter (a server
+     * handling concurrent requests, say) cannot interleave them.
+     *
+     * The queue is per adapter instance, so two adapters still run in parallel.
+     * A caller that wants concurrency should construct one adapter per concurrent
+     * environment; this makes the shared case correct rather than merely
+     * documented.
+     *
+     * @param decide - the decision function called with the built request.
+     * @param objective - the caller's goal.
+     * @param input - optional cancellation and per-call budget.
+     * @returns the observation, the request, the result, and the mapped action.
+     * @throws DecisionError when the environment cannot express the task, or when
+     *   the decision cannot be mapped — the same errors the individual steps throw.
+     */
+    decision(decide: (request: DecisionRequest) => Promise<DecisionResult>, objective: Objective, input?: ObserveInput): Promise<{
+        observation: Observation;
+        request: DecisionRequest;
+        result: DecisionResult;
+        action: EnvironmentAction;
+    }>;
     dispose(): Promise<void>;
 }
 /**

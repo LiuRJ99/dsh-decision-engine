@@ -23,6 +23,7 @@ import {
   type DecisionRankEntry,
   type DecisionRequest,
   type DecisionResult,
+  type DecisionUsage,
 } from './types.ts'
 
 /** A request that passed validation, with the mode and candidate index resolved. */
@@ -171,6 +172,30 @@ function readConfidence(
   }
 }
 
+/**
+ * Keep only the usage counters a caller can act on: finite, non-negative
+ * numbers. A provider reporting a nonsense count must not fail an otherwise good
+ * decision — usage is accounting, not protocol conformance.
+ */
+function sanitizeUsage(value: unknown): DecisionUsage | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const usage: DecisionUsage = {}
+  for (const key of ['inputTokens', 'outputTokens'] as const) {
+    const raw = record[key]
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) usage[key] = raw
+  }
+  const metrics = record.metrics
+  if (typeof metrics === 'object' && metrics !== null && !Array.isArray(metrics)) {
+    const kept: Record<string, number> = {}
+    for (const [name, raw] of Object.entries(metrics as Record<string, unknown>)) {
+      if (typeof raw === 'number' && Number.isFinite(raw)) kept[name] = raw
+    }
+    if (Object.keys(kept).length > 0) usage.metrics = kept
+  }
+  return Object.keys(usage).length === 0 ? undefined : usage
+}
+
 /** Sort comparator: highest score first, ties broken by original order (stable). */
 function byScoreDescending(left: { index: number; score: number | undefined }, right: { index: number; score: number | undefined }): number {
   const leftScore = left.score ?? Number.NEGATIVE_INFINITY
@@ -275,12 +300,18 @@ export function normalizeDecisionResult(
   }
   const debug: DecisionResult['debug'] | undefined = options.includeDebug === true ? value.debug : undefined
 
+  // A provider may name the arm that answered; otherwise the registered id is
+  // the answer. Routing already happened, so this is descriptive.
+  const reportedProvider = typeof value.provider === 'string' && value.provider.trim() !== ''
+    ? value.provider
+    : options.providerId
   return createDecisionResult({
-    provider: options.providerId,
+    provider: reportedProvider,
     mode: options.mode,
     selected: resolvedSelected,
     ranking,
     latencyMs: options.latencyMs,
+    ...sanitizeUsage(value.usage) === undefined ? {} : { usage: sanitizeUsage(value.usage) },
     ...confidence.confidence === undefined ? {} : { confidence: confidence.confidence },
     ...confidence.confidenceKind === undefined ? {} : { confidenceKind: confidence.confidenceKind },
     ...debug === undefined ? {} : { debug: debug as DecisionResult['debug'] },

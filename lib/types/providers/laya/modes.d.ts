@@ -108,5 +108,7 @@ export declare function toResult(translated: TranslatedAnswer, options: {
     mode: DecisionMode;
     latencyMs: number;
     includeDebug: boolean;
+    /** Input tokens the SDK reported for this call, when it reported them. */
+    inputTokens?: number;
 }): DecisionResult;
 //# sourceMappingURL=modes.d.ts.map

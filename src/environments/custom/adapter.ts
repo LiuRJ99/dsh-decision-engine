@@ -91,8 +91,30 @@ export class CustomEnvironmentAdapter<State = unknown> implements EnvironmentAda
   readonly capabilities = ['observe', 'buildDecisionRequest', 'mapDecision', 'execute'] as const
 
   readonly #spec: CustomEnvironmentSpec<State>
-  #pending = new Map<string, CustomCandidate<State>>()
+  /**
+   * Candidate sets offered by recent `buildDecisionRequest` calls, newest last.
+   *
+   * Per-instance because it has to survive from `buildDecisionRequest` through
+   * to `mapDecision` and `execute` — but an adapter driven by more than one
+   * caller at a time keeps producing new candidate sets, and a decision built
+   * from an earlier one must still map. A bounded history plus a per-action
+   * snapshot (below) makes that work instead of failing a valid decision with
+   * `unknown_candidate`.
+   */
+  #offered: Map<string, CustomCandidate<State>>[] = []
+  /**
+   * The candidate each action was mapped from.
+   *
+   * `execute` receives only the action, and the candidate holds the
+   * environment-owned payload — so the association has to survive on something
+   * the caller cannot forge. A `WeakMap` keyed by the action object does that
+   * without putting adapter-private state into the protocol type, and without
+   * keeping the action alive.
+   */
+  readonly #actionCandidates = new WeakMap<EnvironmentAction, CustomCandidate<State>>()
   #lastState: State | undefined
+  /** Serializes {@link CustomEnvironmentAdapter.decision} on this instance. */
+  #gate: Promise<unknown> = Promise.resolve()
 
   constructor(spec: CustomEnvironmentSpec<State>) {
     if (typeof spec?.id !== 'string' || spec.id.trim() === '') {
@@ -145,7 +167,10 @@ export class CustomEnvironmentAdapter<State = unknown> implements EnvironmentAda
         details: { offered: offered.map(candidate => candidate.id) },
       })
     }
-    this.#pending = new Map(available.map(candidate => [candidate.id, candidate]))
+    // Newest last, bounded: enough history to map a decision that was built a
+    // few requests ago, without growing without limit on a long-lived adapter.
+    this.#offered.push(new Map(available.map(candidate => [candidate.id, candidate])))
+    if (this.#offered.length > OFFERED_HISTORY) this.#offered.shift()
     const projected = this.#spec.projectState === undefined ? state : this.#spec.projectState(state)
     const objectiveText = objective.description === '' ? this.#spec.defaultObjective : objective.description
     return {
@@ -168,26 +193,40 @@ export class CustomEnvironmentAdapter<State = unknown> implements EnvironmentAda
     if (selected === undefined) {
       throw new DecisionError('invalid_decision', `Provider "${result.provider}" returned no selection.`, { subject: result.provider })
     }
-    const candidate = this.#pending.get(selected)
+    const candidate = this.#findCandidate(selected)
     if (candidate === undefined) {
       throw new DecisionError('unknown_candidate', `Decision "${selected}" does not map to an action of environment "${this.id}".`, {
         subject: this.id,
-        details: { selected, offered: [...this.#pending.keys()] },
+        details: { selected, offered: [...(this.#offered.at(-1)?.keys() ?? [])] },
       })
     }
     void observation
-    return {
+    const action: EnvironmentAction = {
       kind: 'custom',
       candidateId: candidate.id,
       description: candidate.description,
       ...candidate.action === undefined ? {} : { payload: candidate.action },
       ...candidate.risky === true ? { risky: true } : {},
     }
+    this.#actionCandidates.set(action, candidate)
+    return action
+  }
+
+  /** Look up an offered candidate in the newest set first, then in history. */
+  #findCandidate(id: string): CustomCandidate<State> | undefined {
+    for (let index = this.#offered.length - 1; index >= 0; index -= 1) {
+      const found = this.#offered[index]?.get(id)
+      if (found !== undefined) return found
+    }
+    return undefined
   }
 
   /** Execute a mapped custom action. */
   async execute(action: EnvironmentAction, input?: ExecuteInput): Promise<CustomExecutionResult> {
-    const candidate = this.#pending.get(action.candidateId)
+    // The action knows which candidate it came from; falling back to a history
+    // lookup keeps an action built by an older adapter version (or reconstructed
+    // by a caller) working as long as the candidate is still remembered.
+    const candidate = this.#actionCandidates.get(action) ?? this.#findCandidate(action.candidateId)
     if (candidate === undefined) {
       throw new DecisionError('unknown_candidate', `Action "${action.candidateId}" was not offered by environment "${this.id}".`, { subject: this.id })
     }
@@ -214,10 +253,54 @@ export class CustomEnvironmentAdapter<State = unknown> implements EnvironmentAda
     return this.#lastState
   }
 
+  /**
+   * Run one whole decision against this environment, serialized.
+   *
+   * `buildDecisionRequest` records the offered candidates on the instance and
+   * `mapDecision`/`execute` read them back, so two overlapping calls on ONE
+   * adapter leave the earlier request unmappable — a valid decision then fails
+   * with `unknown_candidate`, which reads like a bug rather than a concurrency
+   * artifact. This method holds the four protocol steps together **and runs them
+   * one at a time per instance**, so a caller that shares an adapter (a server
+   * handling concurrent requests, say) cannot interleave them.
+   *
+   * The queue is per adapter instance, so two adapters still run in parallel.
+   * A caller that wants concurrency should construct one adapter per concurrent
+   * environment; this makes the shared case correct rather than merely
+   * documented.
+   *
+   * @param decide - the decision function called with the built request.
+   * @param objective - the caller's goal.
+   * @param input - optional cancellation and per-call budget.
+   * @returns the observation, the request, the result, and the mapped action.
+   * @throws DecisionError when the environment cannot express the task, or when
+   *   the decision cannot be mapped — the same errors the individual steps throw.
+   */
+  async decision(
+    decide: (request: DecisionRequest) => Promise<DecisionResult>,
+    objective: Objective,
+    input?: ObserveInput,
+  ): Promise<{ observation: Observation; request: DecisionRequest; result: DecisionResult; action: EnvironmentAction }> {
+    const run = async (): Promise<{ observation: Observation; request: DecisionRequest; result: DecisionResult; action: EnvironmentAction }> => {
+      const observation = await this.observe(input)
+      const request = this.buildDecisionRequest(observation, objective)
+      const result = await decide(request)
+      const action = this.mapDecision(result, observation)
+      return { observation, request, result, action }
+    }
+    const next = this.#gate.then(run, run)
+    // Keep the chain alive on failure without leaking an unhandled rejection.
+    this.#gate = next.then(() => undefined, () => undefined)
+    return next
+  }
+
   async dispose(): Promise<void> {
     await this.#spec.dispose?.()
   }
 }
+
+/** How many recent candidate sets an adapter remembers for mapping. */
+const OFFERED_HISTORY = 8
 
 /**
  * Coerce an arbitrary structured state into something the decision protocol
