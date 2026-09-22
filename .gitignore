@@ -1,0 +1,9 @@
+# Build artifacts, not sources. `lib/` is rebuilt by `npm run build`; commit it
+# only when publishing a git-hosted install that cannot run a build.
+node_modules/
+lib/
+*.tsbuildinfo
+
+# pnpm
+.pnpm-store/
+.npmrc.local

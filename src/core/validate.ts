@@ -1,0 +1,237 @@
+/**
+ * Request validation and result normalization — the guard rails that keep an
+ * untrusted or buggy provider from leaking into the environment layer.
+ *
+ * Two rules justify this module's existence:
+ *
+ * 1. A decision may only ever name an id the caller supplied. A provider that
+ *    invents an action fails the call rather than reaching an action mapper.
+ * 2. A result the protocol cannot express is a failure, not something to
+ *    repair silently.
+ *
+ * @module dsh-decision-engine/core/validate
+ */
+
+import { DecisionError } from './errors.ts'
+import { createDecisionResult, isDecisionCapability, type DecisionCandidate, type DecisionMode, type DecisionRankEntry, type DecisionRequest, type DecisionResult } from './types.ts'
+
+/** A request that passed validation, with the mode and candidate index resolved. */
+export interface ValidatedRequest {
+  request: DecisionRequest
+  /** Mode to run: the request's, or `choice` when omitted. */
+  mode: DecisionMode
+  /** Candidate id → candidate, for O(1) membership checks. */
+  byId: Map<string, DecisionCandidate>
+}
+
+/** Longest candidate list accepted in one request. Keeps the finite-candidate promise real. */
+export const MAX_CANDIDATES = 64
+
+/** Longest state payload accepted, in characters, so one call cannot flood a model context. */
+export const MAX_STATE_CHARS = 200_000
+
+/** Longest objective accepted, in characters. */
+export const MAX_OBJECTIVE_CHARS = 8_000
+
+/**
+ * Validate a caller-supplied request.
+ *
+ * @param request - the raw request.
+ * @returns the validated request plus resolved mode and candidate index.
+ * @throws DecisionError with `invalid_request` or `no_candidates`.
+ */
+export function validateRequest(request: DecisionRequest): ValidatedRequest {
+  if (typeof request !== 'object' || request === null || Array.isArray(request)) {
+    throw new DecisionError('invalid_request', 'A decision request must be an object.')
+  }
+  const state = request.state
+  if (typeof state !== 'string' && (typeof state !== 'object' || state === null || Array.isArray(state))) {
+    throw new DecisionError('invalid_request', 'A decision request must carry state as a string or an object.')
+  }
+  if (typeof state === 'string' && state.length > MAX_STATE_CHARS) {
+    throw new DecisionError('invalid_request', `State exceeds the ${MAX_STATE_CHARS}-character limit.`, {
+      details: { length: state.length, limit: MAX_STATE_CHARS },
+    })
+  }
+  if (request.objective !== undefined && typeof request.objective !== 'string') {
+    throw new DecisionError('invalid_request', 'objective must be a string when present.')
+  }
+  if (typeof request.objective === 'string' && request.objective.length > MAX_OBJECTIVE_CHARS) {
+    throw new DecisionError('invalid_request', `Objective exceeds the ${MAX_OBJECTIVE_CHARS}-character limit.`, {
+      details: { length: request.objective.length, limit: MAX_OBJECTIVE_CHARS },
+    })
+  }
+  if (request.mode !== undefined && !isDecisionCapability(request.mode)) {
+    throw new DecisionError('invalid_request', `Unknown decision mode "${String(request.mode)}".`, {
+      details: { supported: ['choice', 'ranking', 'score', 'classification'] },
+    })
+  }
+  if (request.constraints !== undefined && (!Array.isArray(request.constraints) || request.constraints.some(item => typeof item !== 'string'))) {
+    throw new DecisionError('invalid_request', 'constraints must be an array of strings when present.')
+  }
+  if (!Array.isArray(request.candidates)) {
+    throw new DecisionError('invalid_request', 'A decision request must carry a candidates array.')
+  }
+  if (request.candidates.length === 0) {
+    throw new DecisionError('no_candidates', 'A decision request must carry at least one candidate.', {
+      details: { hint: 'Supply the finite option set the decider may choose from.' },
+    })
+  }
+  if (request.candidates.length > MAX_CANDIDATES) {
+    throw new DecisionError('invalid_request', `Candidate count exceeds the ${MAX_CANDIDATES}-candidate limit.`, {
+      details: { count: request.candidates.length, limit: MAX_CANDIDATES },
+    })
+  }
+  const byId = new Map<string, DecisionCandidate>()
+  for (let index = 0; index < request.candidates.length; index += 1) {
+    const candidate = request.candidates[index]
+    if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
+      throw new DecisionError('invalid_request', `candidates[${index}] must be an object.`)
+    }
+    if (typeof candidate.id !== 'string' || candidate.id.trim() === '') {
+      throw new DecisionError('invalid_request', `candidates[${index}].id must be a non-empty string.`)
+    }
+    if (typeof candidate.description !== 'string' || candidate.description.trim() === '') {
+      throw new DecisionError('invalid_request', `candidates[${index}].description must be a non-empty string.`)
+    }
+    if (byId.has(candidate.id)) {
+      throw new DecisionError('invalid_request', `Duplicate candidate id "${candidate.id}".`, { details: { id: candidate.id } })
+    }
+    byId.set(candidate.id, candidate)
+  }
+  const mode: DecisionMode = request.mode ?? 'choice'
+  return { request, mode, byId }
+}
+
+/** Maximum acceptable confidence value; anything outside 0..1 is a provider bug. */
+function normalizeConfidence(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  if (value < 0 || value > 1) return undefined
+  return value
+}
+
+/** Sort comparator: highest score first, ties broken by original order (stable). */
+function byScoreDescending(left: { index: number; score: number | undefined }, right: { index: number; score: number | undefined }): number {
+  const leftScore = left.score ?? Number.NEGATIVE_INFINITY
+  const rightScore = right.score ?? Number.NEGATIVE_INFINITY
+  if (rightScore !== leftScore) return rightScore - leftScore
+  return left.index - right.index
+}
+
+/**
+ * Normalize a provider's raw answer into a protocol {@link DecisionResult}.
+ *
+ * The provider may return a partial result — typically only `selected` or only
+ * `ranking`. This function:
+ * - rejects a `selected` id outside the candidate set (`unknown_candidate`),
+ * - drops ranking entries outside it rather than failing the whole call,
+ * - derives `selected` from the ranking when the provider omitted it,
+ * - derives `ranking` from `selected` when the ranking is empty,
+ * - keeps `confidence` only when it is a finite 0..1 number.
+ *
+ * @param raw - the provider's answer, before protocol enforcement.
+ * @param options - validated request facts the provider answered.
+ * @returns the normalized result.
+ * @throws DecisionError with `invalid_decision` or `unknown_candidate`.
+ */
+export function normalizeDecisionResult(
+  raw: unknown,
+  options: {
+    providerId: string
+    mode: DecisionMode
+    validated: ValidatedRequest
+    latencyMs: number
+    /** Whether the caller asked for provider-private debug detail. */
+    includeDebug?: boolean
+  },
+): DecisionResult {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new DecisionError('invalid_decision', `Provider "${options.providerId}" returned a non-object decision.`, {
+      subject: options.providerId,
+      details: { received: typeof raw },
+    })
+  }
+  const value = raw as Partial<DecisionResult> & { provider?: unknown; mode?: unknown }
+
+  const { byId } = options.validated
+  const selected = value.selected
+  if (selected !== undefined && typeof selected !== 'string') {
+    throw new DecisionError('invalid_decision', `Provider "${options.providerId}" returned a non-string selected id.`, {
+      subject: options.providerId,
+      details: { received: typeof selected },
+    })
+  }
+  if (selected !== undefined && !byId.has(selected)) {
+    throw new DecisionError('unknown_candidate', `Provider "${options.providerId}" selected "${selected}", which is not in the candidate set.`, {
+      subject: options.providerId,
+      details: { selected, candidates: [...byId.keys()] },
+    })
+  }
+
+  const ranking: DecisionRankEntry[] = []
+  const seen = new Set<string>()
+  if (value.ranking !== undefined) {
+    if (!Array.isArray(value.ranking)) {
+      throw new DecisionError('invalid_decision', `Provider "${options.providerId}" returned a non-array ranking.`, {
+        subject: options.providerId,
+        details: { received: typeof value.ranking },
+      })
+    }
+    for (let index = 0; index < value.ranking.length; index += 1) {
+      const entry = value.ranking[index]
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue
+      const id = (entry as { id?: unknown }).id
+      if (typeof id !== 'string' || !byId.has(id) || seen.has(id)) continue
+      seen.add(id)
+      const score = (entry as { score?: unknown }).score
+      ranking.push(
+        typeof score === 'number' && Number.isFinite(score)
+          ? { id, score }
+          : { id },
+      )
+    }
+  }
+
+  let resolvedSelected = selected
+  if (resolvedSelected === undefined && ranking.length > 0) resolvedSelected = ranking[0]?.id
+  if (ranking.length === 0) {
+    if (resolvedSelected === undefined) {
+      throw new DecisionError('invalid_decision', `Provider "${options.providerId}" returned neither a selection nor a ranking.`, {
+        subject: options.providerId,
+      })
+    }
+    ranking.push({ id: resolvedSelected })
+  }
+  if (resolvedSelected === undefined) {
+    throw new DecisionError('invalid_decision', `Provider "${options.providerId}" produced no usable selection.`, {
+      subject: options.providerId,
+    })
+  }
+
+  const confidence = normalizeConfidence(value.confidence)
+  const debug: DecisionResult['debug'] | undefined = options.includeDebug === true ? value.debug : undefined
+
+  return createDecisionResult({
+    provider: options.providerId,
+    mode: options.mode,
+    selected: resolvedSelected,
+    ranking,
+    latencyMs: options.latencyMs,
+    ...confidence === undefined ? {} : { confidence },
+    ...debug === undefined ? {} : { debug: debug as DecisionResult['debug'] },
+  })
+}
+
+/**
+ * Sort candidate ids by descending score. Used by providers that score every
+ * candidate and by the `score`/`ranking` modes.
+ *
+ * @param entries - id/score pairs, scores optional.
+ * @returns a new array, best first, ties in the input's order.
+ */
+export function rankByScore(entries: readonly { id: string; score?: number }[]): DecisionRankEntry[] {
+  return entries
+    .map((entry, index) => ({ id: entry.id, score: entry.score, index }))
+    .sort(byScoreDescending)
+    .map(entry => (entry.score === undefined ? { id: entry.id } : { id: entry.id, score: entry.score }))
+}

@@ -1,0 +1,47 @@
+# dsh-decision-engine bundle patch: one host-plane row that brings the decision
+# layer, the Laya provider, the single `decision_decide` tool, and the
+# `decision-control` skill into a profile.
+#
+# The row is host-plane because the layer is a singleton service
+# (`ctx.decisionEngine`) plus host-registered capabilities, so every preset in
+# the profile (standard, creator/cordis, code) sees them. The environment
+# adapters do not own browser or computer permission: they dispatch through the
+# host's registered `browser_*` / `computer_use_*` tools, so the session-lazy
+# capability gate stays the single authority on whether a capability is
+# reachable.
+#
+# The `name` resolves through the profile's node_modules via this package's
+# exports map, so `dsh plugin --profile <name> add <this package>` is enough.
+#
+# Provider-private settings belong under `providers.<id>` — never as top-level
+# keys — so a second model family can be added without touching this row's
+# schema. `providers.laya.modelDir` has no portable default: leave it unset and
+# the SDK resolves its own cached bundle, or point it at a local export
+# directory from the profile's own cordis.patch.yml.
+
+- insert:
+    - id: decision-engine
+      name: dsh-decision-engine
+      config:
+        enabled: true
+        defaultProvider: laya
+
+        providers:
+          laya:
+            enabled: true
+            # Optional. `cpu` is the portable default; `coreml` is faster on
+            # Apple silicon when the ONNX build supports it.
+            device: cpu
+
+        runtime:
+          confidenceThreshold: 0.55
+          maxSteps: 10
+          maxDurationMs: 120000
+          noProgressLimit: 3
+          repeatedDecisionLimit: 3
+
+        browser:
+          enabled: true
+
+        computer:
+          enabled: true

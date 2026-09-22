@@ -1,0 +1,101 @@
+{
+  "name": "dsh-decision-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Model-agnostic low-latency decision layer for DeepSeek Harness (DSH): a Decision Engine with pluggable Decision Providers, a finite-candidate decision protocol, and Browser / Computer / Custom environment adapters. Laya is the first provider, not the architecture.",
+  "license": "MIT",
+  "author": "LiuRJ99",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./core": {
+      "types": "./lib/types/core/index.d.ts",
+      "default": "./lib/core/index.js"
+    },
+    "./providers/laya": {
+      "types": "./lib/types/providers/laya/index.d.ts",
+      "default": "./lib/providers/laya/index.js"
+    },
+    "./environments/browser": {
+      "types": "./lib/types/environments/browser/adapter.d.ts",
+      "default": "./lib/environments/browser/adapter.js"
+    },
+    "./environments/computer": {
+      "types": "./lib/types/environments/computer/adapter.d.ts",
+      "default": "./lib/environments/computer/adapter.js"
+    },
+    "./environments/custom": {
+      "types": "./lib/types/environments/custom/adapter.d.ts",
+      "default": "./lib/environments/custom/adapter.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "skills"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"tests/**/*.test.ts\"",
+    "test:unit": "node --test \"tests/unit/*.test.ts\"",
+    "test:integration": "node --test \"tests/integration/*.test.ts\"",
+    "bench": "node examples/bench-latency.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.18.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-agent": ">=0.1.2-rc.1 <0.2.0",
+    "@deepseek-ai/dsh-llm": ">=0.1.2-rc.1 <0.2.0",
+    "@deepseek-ai/dsh-system-prompt": ">=0.1.2-rc.1 <0.2.0",
+    "@deepseek-ai/dsh-tools": ">=0.1.2-rc.1 <0.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@receptron/laya": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-code-runtime": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-scope": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-util-values": "0.1.5-rc.2",
+    "@deepseek-ai/schemastery": "3.18.2",
+    "@types/node": "^22.20.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^6.0.3"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "decision-engine",
+    "decision-provider",
+    "system-1",
+    "browser",
+    "computer-use",
+    "laya"
+  ]
+}
