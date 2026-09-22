@@ -199,6 +199,15 @@ describe('tool definition', () => {
     assert.match(preflightDecideInput({ objective: 'x' }, service) ?? '', /pass state, or pass environment/)
   })
 
+  it('accepts state as a string or an object, matching the documented example', async () => {
+    // The README's minimal example passes state as a string, so the schema must
+    // accept both forms — a mismatch here only shows up when the tool is really
+    // dispatched, which is how it was found.
+    const { PARAMETERS } = await import('../../src/tools/decide-logic.ts')
+    const state = PARAMETERS.state as { oneOf?: { type: string }[] }
+    assert.deepEqual(state.oneOf?.map(branch => branch.type), ['object', 'string'])
+  })
+
   it('renders an escalation with guidance and no fabricated decision', () => {
     const text = renderDecideOutput({
       status: 'needs_escalation',

@@ -189,9 +189,14 @@ export const PARAMETERS = {
     description: 'What the caller is trying to achieve. Prefer naming the concrete next outcome.',
   },
   state: {
-    type: 'object' as const,
-    additionalProperties: true,
-    description: 'Structured environment state to decide about. Omit when environment is given and the adapter should observe.',
+    // Both forms are accepted, because both are real: a workflow passes
+    // structured state, while a caller reading a page or a log has a string.
+    oneOf: [
+      { type: 'object' as const, additionalProperties: true },
+      { type: 'string' as const },
+    ],
+    description: 'Environment state to decide about: a structured object, or a string when that is what the caller has. '
+      + 'Omit when environment is given and the adapter should observe.',
   },
   candidates: {
     type: 'array' as const,

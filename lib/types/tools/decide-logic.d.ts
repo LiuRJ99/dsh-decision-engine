@@ -110,9 +110,13 @@ export declare const PARAMETERS: {
         readonly description: "What the caller is trying to achieve. Prefer naming the concrete next outcome.";
     };
     readonly state: {
-        readonly type: "object";
-        readonly additionalProperties: true;
-        readonly description: "Structured environment state to decide about. Omit when environment is given and the adapter should observe.";
+        readonly oneOf: readonly [{
+            readonly type: "object";
+            readonly additionalProperties: true;
+        }, {
+            readonly type: "string";
+        }];
+        readonly description: string;
     };
     readonly candidates: {
         readonly type: "array";
