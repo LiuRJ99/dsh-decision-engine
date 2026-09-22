@@ -41,7 +41,16 @@ Browser / Computer / Custom 三个环境适配器**一行都不用改**。
    Provider 只看到候选 id 和描述。
 
 > 外部软件怎么接进来：见 [`docs/外部接入规范.md`](docs/外部接入规范.md)。
-> 该文档给出两套角色（Environment 侧、Provider 侧）的完整契约、错误模型和可直接抄的样例。
+> 一句话版本 —— 非 DSH 宿主（游戏、业务系统、模拟器）用一次调用即可嵌入：
+>
+> ```js
+> import { createDecisionLayer } from 'dsh-decision-engine/embed'
+> const decisions = createDecisionLayer({ modelDir: '/path/to/bundle' })
+> decisions.environments.register(myGameAdapter)
+> const outcome = await decisions.decideEnvironment({ environment: 'my-game', objective: '赢下这一局。' })
+> ```
+>
+> 完整契约（两套角色、错误模型、HTTP 线格式、检查清单）在那个文档里。
 
 ---
 
@@ -400,6 +409,10 @@ node examples/verify-exports.mjs
 
 # 设置面板：用真实文件后端注册命名空间，检查面板会渲染什么
 node examples/verify-settings-panel.mjs
+
+# 无 DSH 依赖的嵌入验证（外部软件接入路径）
+node examples/verify-embedding.mjs
+node examples/verify-embedding.mjs --laya     # 用真模型
 
 # 决策工具经真实 ctx.tools 注册表派发
 node examples/verify-host-integration.mjs

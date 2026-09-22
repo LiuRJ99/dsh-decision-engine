@@ -45,7 +45,11 @@
       "default": "./lib/environments/custom/adapter.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./embed": {
+      "types": "./lib/types/embed.d.ts",
+      "default": "./lib/embed.js"
+    }
   },
   "files": [
     "lib",

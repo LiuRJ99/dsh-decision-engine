@@ -32,7 +32,23 @@ function sourceFiles(dir: string): string[] {
 }
 
 /** Import specifiers in a file, including dynamic imports. */
-function importSpecifiers(text: string): string[] {
+/**
+ * Strip comments before scanning for imports.
+ *
+ * Documentation legitimately contains usage examples — `src/embed.ts` shows
+ * `import { createDecisionLayer } from 'dsh-decision-engine/embed'` in its module
+ * docblock — and a naive scan reads those as real imports. A block comment can
+ * also hide real code, so this removes comments rather than lines that look like
+ * comments.
+ */
+function stripComments(text: string): string {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+}
+
+function importSpecifiers(source: string): string[] {
+  const text = stripComments(source)
   const specifiers: string[] = []
   const staticImport = /\bfrom\s+['"]([^'"]+)['"]/g
   const bareImport = /\bimport\s+['"]([^'"]+)['"]/g

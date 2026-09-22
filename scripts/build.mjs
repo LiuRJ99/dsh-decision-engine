@@ -31,6 +31,7 @@ const ENTRIES = [
   { entry: 'src/index.ts', outfile: 'lib/index.js' },
   { entry: 'src/plugin.ts', outfile: 'lib/plugin.js' },
   { entry: 'src/composition.ts', outfile: 'lib/composition.js' },
+  { entry: 'src/embed.ts', outfile: 'lib/embed.js' },
   { entry: 'src/core/index.ts', outfile: 'lib/core/index.js' },
   { entry: 'src/runtime/index.ts', outfile: 'lib/runtime/index.js' },
   { entry: 'src/environments/browser/adapter.ts', outfile: 'lib/environments/browser/adapter.js' },
