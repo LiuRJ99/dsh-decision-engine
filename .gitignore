@@ -12,6 +12,9 @@ node_modules/
 # dependency's build script. `npm run build` still regenerates it from `src/`,
 # and CI can check the committed artifacts are current.
 #
+# Scratch directory created by examples/verify-exports.mjs.
+.exports-check/
+
 # The implementation report for this project is a session artifact, not part of
 # the plugin.
 实施报告.md

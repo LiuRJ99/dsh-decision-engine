@@ -282,6 +282,10 @@ node examples/demo-custom-game.mjs --provider laya
 # one real desktop action through the decision layer (previews unless --yes)
 node examples/verify-real-computer.mjs --app Finder
 
+# every public entry resolved through the package's `exports` map, including the
+# Cordis entry the bundle patch names (this is what caught a broken v0.1.0)
+node examples/verify-exports.mjs
+
 # the decision tool dispatched through a real ctx.tools registry
 node examples/verify-host-integration.mjs
 

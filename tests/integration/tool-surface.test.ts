@@ -204,7 +204,7 @@ describe('tool definition', () => {
     // accept both forms — a mismatch here only shows up when the tool is really
     // dispatched, which is how it was found.
     const { PARAMETERS } = await import('../../src/tools/decide-logic.ts')
-    const state = PARAMETERS.state as { oneOf?: { type: string }[] }
+    const state = PARAMETERS.state as unknown as { oneOf?: { type: string }[] }
     assert.deepEqual(state.oneOf?.map(branch => branch.type), ['object', 'string'])
   })
 
