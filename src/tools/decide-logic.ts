@@ -23,7 +23,7 @@
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { toDecisionFailure } from '../core/errors.ts'
 import { validateRequest } from '../core/validate.ts'
-import type { DecisionMode } from '../core/types.ts'
+import type { DecisionConfidenceKind, DecisionMode } from '../core/types.ts'
 import type { EnvironmentAction, Objective } from '../environments/types.ts'
 import type { ExecutionMode, RuntimeOutcome } from '../runtime/runner.ts'
 import { DecisionError } from '../core/errors.ts'
@@ -73,7 +73,12 @@ export interface DecideToolOutput {
   mode?: DecisionMode
   selected?: string
   candidates?: string[]
+  /** 0..1 confidence, comparable across providers only when `confidenceKind` is `normalized`. */
   confidence?: number
+  /** What `confidence` is: `normalized`, `provider_raw`, or `unavailable`. */
+  confidenceKind?: DecisionConfidenceKind
+  /** The provider's own confidence, on the provider's own scale. Never gated on. */
+  rawConfidence?: number
   latencyMs?: number
   /** Mapped action preview — what the decision means in the environment. */
   action?: {
@@ -263,6 +268,7 @@ export function projectOutcome(outcome: RuntimeOutcome): DecideToolOutput {
       ...escalation.provider === undefined ? {} : { provider: escalation.provider },
       ...escalation.lastDecision?.selected === undefined ? {} : { selected: escalation.lastDecision.selected },
       ...escalation.lastDecision?.confidence === undefined ? {} : { confidence: escalation.lastDecision.confidence },
+      ...escalation.lastDecision?.confidenceKind === undefined ? {} : { confidenceKind: escalation.lastDecision.confidenceKind as DecisionConfidenceKind },
       ...escalation.details === undefined ? {} : { debug: toJsonObject(escalation.details) },
     }
   }
@@ -276,6 +282,8 @@ export function projectOutcome(outcome: RuntimeOutcome): DecideToolOutput {
       latencyMs: outcome.decision.latencyMs,
       ...outcome.decision.selected === undefined ? {} : { selected: outcome.decision.selected },
       ...outcome.decision.confidence === undefined ? {} : { confidence: outcome.decision.confidence },
+      ...outcome.decision.confidenceKind === undefined ? {} : { confidenceKind: outcome.decision.confidenceKind },
+      ...outcome.decision.debug?.rawConfidence === undefined ? {} : { rawConfidence: outcome.decision.debug.rawConfidence },
       ...outcome.decision.debug === undefined ? {} : { debug: toJsonObject(outcome.decision.debug) },
     },
     ...action === undefined ? {} : { action },
@@ -304,7 +312,15 @@ export function renderDecideOutput(output: DecideToolOutput): string {
   if (output.provider !== undefined) lines.push(`Provider: ${output.provider}`)
   if (output.mode !== undefined) lines.push(`Mode: ${output.mode}`)
   if (output.selected !== undefined) lines.push(`Decision: ${output.selected}`)
-  if (output.confidence !== undefined) lines.push(`Confidence: ${output.confidence.toFixed(3)}`)
+  if (output.confidence !== undefined) {
+    const kind = output.confidenceKind === undefined ? '' : ` (${output.confidenceKind})`
+    lines.push(`Confidence: ${output.confidence.toFixed(3)}${kind}`)
+  } else if (output.confidenceKind !== undefined) {
+    lines.push(`Confidence: unavailable (${output.confidenceKind})`)
+  }
+  if (output.rawConfidence !== undefined && output.rawConfidence !== output.confidence) {
+    lines.push(`Provider raw confidence (own scale, not gated): ${output.rawConfidence.toFixed(3)}`)
+  }
   if (output.latencyMs !== undefined) lines.push(`Provider latency: ${output.latencyMs}ms`)
   if (output.candidates !== undefined && output.candidates.length > 0) lines.push(`Ranked candidates: ${output.candidates.join(' > ')}`)
   if (output.action !== undefined) {
@@ -381,6 +397,8 @@ export async function executeDecide(input: DecideToolInput, context: DecideToolC
     ...result.selected === undefined ? {} : { selected: result.selected },
     candidates: ranked.length > 0 ? ranked : input.candidates.map(candidate => candidate.id),
     ...result.confidence === undefined ? {} : { confidence: result.confidence },
+    ...result.confidenceKind === undefined ? {} : { confidenceKind: result.confidenceKind },
+    ...result.debug?.rawConfidence === undefined ? {} : { rawConfidence: result.debug.rawConfidence },
     latencyMs: result.latencyMs,
     ...result.debug === undefined ? {} : { debug: toJsonObject(result.debug) },
     stopReason: 'Decision only: nothing was executed.',

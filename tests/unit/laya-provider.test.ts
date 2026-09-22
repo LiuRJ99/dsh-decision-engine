@@ -88,8 +88,10 @@ describe('laya choice', () => {
     assert.equal(result.provider, 'laya')
     assert.equal(result.mode, 'choice')
     assert.equal(result.selected, 'open')
-    assert.ok((result.confidence ?? 0) > 0)
-    assert.equal(result.debug, undefined, 'probabilities must not leak without debug')
+    // The SDK's own confidence is reported, labelled as its own scale.
+    assert.equal(result.confidenceKind, 'provider_raw')
+    assert.equal(result.confidence, 0.8)
+    assert.deepEqual(result.debug, { rawConfidence: 0.8 }, 'probabilities must not leak without debug')
     assert.equal(calls.length, 1)
     assert.equal(calls[0]?.questions[QUESTION_KEYS.select]?.type, 'choice')
     assert.deepEqual(Object.keys(calls[0]?.questions[QUESTION_KEYS.select]?.criteria as Record<string, string>), ['open', 'reveal', 'close'])
@@ -223,7 +225,9 @@ describe('noul to generic classification', () => {
     assert.equal(calls[0]?.questions[QUESTION_KEYS.binary]?.type, 'noul')
     assert.equal(result.mode, 'classification', 'the public mode is classification, never noul')
     assert.equal(result.selected, 'turn')
-    assert.equal(result.confidence, 0.8)
+    // The winning side's P(true), reported on the model's own scale.
+    assert.equal(result.confidence, 0.9)
+    assert.equal(result.confidenceKind, 'provider_raw')
   })
 
   it('maps p(true) 0.1 to the second candidate', async () => {
@@ -231,7 +235,9 @@ describe('noul to generic classification', () => {
     const provider = new LayaDecisionProvider({ instance, config: { classificationBinaryMode: 'noul' } })
     const result = await provider.decide({ ...BINARY, mode: 'classification' })
     assert.equal(result.selected, 'straight')
-    assert.equal(result.confidence, 0.8)
+    // 1 − 0.1: the probability mass on the side that won.
+    assert.equal(result.confidence, 0.9)
+    assert.equal(result.confidenceKind, 'provider_raw')
   })
 
   it('uses a plain choice when the binary noul mode is not configured', async () => {

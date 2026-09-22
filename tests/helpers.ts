@@ -39,8 +39,17 @@ export class ScriptedProvider implements DecisionProvider {
   }
 }
 
-/** A provider that always picks the same candidate id. */
-export function constantProvider(selected: string, options: { id?: string; confidence?: number; capabilities?: DecisionCapability[] } = {}): ScriptedProvider {
+/**
+ * A provider that always picks the same candidate id.
+ *
+ * `confidenceKind` defaults to `provider_raw` so the stub never trips the
+ * engine's normalized floor by accident; a test that wants the gate to apply
+ * passes `'normalized'` explicitly.
+ */
+export function constantProvider(
+  selected: string,
+  options: { id?: string; confidence?: number; confidenceKind?: 'normalized' | 'provider_raw' | 'unavailable'; capabilities?: DecisionCapability[] } = {},
+): ScriptedProvider {
   return new ScriptedProvider({
     ...options.id === undefined ? {} : { id: options.id },
     ...options.capabilities === undefined ? {} : { capabilities: options.capabilities },
@@ -48,14 +57,16 @@ export function constantProvider(selected: string, options: { id?: string; confi
       provider: options.id ?? 'scripted',
       mode: 'choice',
       selected,
-      ...options.confidence === undefined ? {} : { confidence: options.confidence },
+      ...options.confidence === undefined
+        ? {}
+        : { confidence: options.confidence, confidenceKind: options.confidenceKind ?? 'provider_raw' },
       latencyMs: 1,
     }),
   })
 }
 
 /** A provider that returns candidates in a fixed order with descending scores. */
-export function rankingProvider(order: string[], options: { id?: string; confidence?: number } = {}): ScriptedProvider {
+export function rankingProvider(order: string[], options: { id?: string; confidence?: number; confidenceKind?: 'normalized' | 'provider_raw' } = {}): ScriptedProvider {
   const id = options.id ?? 'scripted'
   return new ScriptedProvider({
     ...options.id === undefined ? {} : { id },
@@ -64,7 +75,9 @@ export function rankingProvider(order: string[], options: { id?: string; confide
       mode: 'ranking',
       ...order[0] === undefined ? {} : { selected: order[0] },
       ranking: order.map((candidateId, index) => ({ id: candidateId, score: 1 - index / (order.length + 1) })),
-      ...options.confidence === undefined ? {} : { confidence: options.confidence },
+      ...options.confidence === undefined
+        ? {}
+        : { confidence: options.confidence, confidenceKind: options.confidenceKind ?? 'provider_raw' },
       latencyMs: 1,
     }),
   })

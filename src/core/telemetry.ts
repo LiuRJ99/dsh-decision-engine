@@ -10,7 +10,7 @@
  */
 
 import type { DecisionErrorCode } from './errors.ts'
-import type { DecisionMode } from './types.ts'
+import type { DecisionConfidenceKind, DecisionMode } from './types.ts'
 
 /** Which layer a timing belongs to, so a slow environment is never blamed on a slow model. */
 export interface DecisionTimings {
@@ -40,8 +40,10 @@ export interface DecisionTelemetry {
   candidateCount?: number
   /** Selected candidate id, when the call succeeded. */
   selected?: string
-  /** Normalized confidence, when the provider produced one. */
+  /** Confidence value, when the provider produced one. */
   confidence?: number
+  /** What that confidence number is (`normalized` / `provider_raw` / `unavailable`). */
+  confidenceKind?: DecisionConfidenceKind
   /** Runtime step index, for step records. */
   step?: number
   /** Escalation or failure reason, when the operation did not proceed. */

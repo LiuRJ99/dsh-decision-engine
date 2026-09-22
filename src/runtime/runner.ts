@@ -29,13 +29,25 @@ import type { EnvironmentRegistry } from '../environments/registry.ts'
 /** How far the runtime is promoted. Nothing runs loops in `decision-only`. */
 export type ExecutionMode = 'decision-only' | 'single-step' | 'bounded-loop'
 
-/** Runtime budgets and stop conditions. */
+/**
+ * Runtime budgets and stop conditions.
+ *
+ * `confidenceThreshold` is the *normalized* floor: it is passed to the engine,
+ * which compares it only with `confidenceKind: 'normalized'` results. A
+ * provider reporting `provider_raw` or `unavailable` is never gated by it —
+ * which is why the Laya provider runs to completion regardless of the
+ * entropy-derived number it reports. See `docs` in `providers/laya/shared.ts`
+ * for the measurements behind that.
+ */
 export interface RuntimeConfig {
   /** Hard step cap for one run. Defaults to 10. */
   maxSteps: number
   /** Hard wall-clock cap for one run, in milliseconds. Defaults to 120000. */
   maxDurationMs: number
-  /** Confidence floor for acting. `0` accepts any confidence the provider gives. */
+  /**
+   * Confidence floor for acting. Applies only to `confidenceKind: 'normalized'`
+   * results; a provider on its own scale is never compared with it.
+   */
   confidenceThreshold: number
   /** How many consecutive steps without a state change trigger `no_progress`. Defaults to 3. */
   noProgressLimit: number
@@ -192,6 +204,7 @@ export class DecisionRuntime {
               lastDecision: {
                 ...lastDecision.selected === undefined ? {} : { selected: lastDecision.selected },
                 ...lastDecision.confidence === undefined ? {} : { confidence: lastDecision.confidence },
+                ...lastDecision.confidenceKind === undefined ? {} : { confidenceKind: lastDecision.confidenceKind },
                 step: history.length,
               },
             },

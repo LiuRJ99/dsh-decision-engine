@@ -70,6 +70,8 @@ export function defineDecideTool(context: DecideToolContext): ToolDefinition {
           selected: { type: 'string' },
           candidates: { type: 'array', items: { type: 'string' } },
           confidence: { type: 'number' },
+          confidenceKind: { type: 'string', enum: ['normalized', 'provider_raw', 'unavailable'] },
+          rawConfidence: { type: 'number' },
           latencyMs: { type: 'number' },
           action: {
             type: 'object',

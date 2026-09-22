@@ -34,6 +34,12 @@
             device: cpu
 
         runtime:
+          # A NORMALIZED confidence floor: the engine compares it only with
+          # results whose confidenceKind is "normalized". The Laya provider
+          # reports "provider_raw" (its entropy confidence does not track
+          # decision quality — see examples/laya-head-calibration.mjs), so this
+          # value never gates a Laya decision. Raise it only for a provider that
+          # declares normalized confidence.
           confidenceThreshold: 0.55
           maxSteps: 10
           maxDurationMs: 120000

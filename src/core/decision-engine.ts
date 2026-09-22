@@ -27,9 +27,14 @@ export interface DecisionEngineConfig {
   /** Provider id used when a request does not name one. */
   defaultProviderId?: string
   /**
-   * Confidence floor for a `choice`/`classification` decision. A result below
-   * it fails with `low_confidence` so the caller escalates instead of acting
-   * on a guess. Set to 0 to accept anything.
+   * Confidence floor for a `choice`/`classification` decision, applied **only
+   * to `confidenceKind: 'normalized'` results**.
+   *
+   * A provider whose confidence is on its own scale (`provider_raw`) or absent
+   * (`unavailable`) is not gated: this threshold is calibrated for one
+   * comparable scale, and applying it to a different provider's number would
+   * refuse that provider's perfectly good decisions. Set to 0 to accept
+   * anything normalized.
    */
   confidenceThreshold?: number
   /** Per-call provider budget in milliseconds. Defaults to 30000. */
@@ -45,6 +50,17 @@ export interface DecisionEngineConfig {
    */
   now?: () => number
 }
+
+/**
+ * Default confidence floor for the one scale it applies to.
+ *
+ * This is a *normalized* threshold: it is compared only with
+ * `confidenceKind: 'normalized'` results, so a provider that reports its own
+ * scale (`provider_raw`) or none (`unavailable`) is unaffected. Deployments
+ * whose providers produce comparable confidence tune it; deployments whose
+ * providers do not can leave it alone, because it never fires for them.
+ */
+export const DEFAULT_CONFIDENCE_THRESHOLD = 0.55
 
 /**
  * Monotonic millisecond clock. `performance.now()` is used rather than
@@ -105,7 +121,7 @@ export class DecisionEngine {
       ...config.allowCapabilityFallback === undefined ? {} : { allowCapabilityFallback: config.allowCapabilityFallback },
     })
     this.#config = {
-      confidenceThreshold: config.confidenceThreshold ?? 0.55,
+      confidenceThreshold: config.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD,
       timeoutMs: config.timeoutMs ?? 30_000,
       allowCapabilityFallback: config.allowCapabilityFallback ?? true,
     }
@@ -169,15 +185,25 @@ export class DecisionEngine {
       })
 
       const threshold = options.confidenceThreshold ?? this.#config.confidenceThreshold
+      // The gate applies to ONE scale only. A raw or unavailable confidence is
+      // reported as-is and never compared with a normalized threshold — that
+      // comparison is exactly how a second provider's scale would start
+      // producing phantom escalations.
+      const gateable = result.confidenceKind === 'normalized' && result.confidence !== undefined
       if (
         threshold > 0
-        && result.confidence !== undefined
-        && result.confidence < threshold
+        && gateable
+        && (result.confidence ?? 0) < threshold
         && (validated.mode === 'choice' || validated.mode === 'classification')
       ) {
-        throw new DecisionError('low_confidence', `Provider "${providerId}" returned confidence ${result.confidence.toFixed(3)}, below the ${threshold} floor.`, {
+        throw new DecisionError('low_confidence', `Provider "${providerId}" returned normalized confidence ${(result.confidence ?? 0).toFixed(3)}, below the ${threshold} floor.`, {
           subject: providerId,
-          details: { confidence: result.confidence, threshold, selected: result.selected },
+          details: {
+            confidence: result.confidence,
+            confidenceKind: result.confidenceKind,
+            threshold,
+            selected: result.selected,
+          },
         })
       }
 
@@ -188,6 +214,7 @@ export class DecisionEngine {
         candidateCount,
         ...result.selected === undefined ? {} : { selected: result.selected },
         ...result.confidence === undefined ? {} : { confidence: result.confidence },
+        ...result.confidenceKind === undefined ? {} : { confidenceKind: result.confidenceKind },
         ...options.environment === undefined ? {} : { environment: options.environment },
         ...options.step === undefined ? {} : { step: options.step },
         timings: {

@@ -13,7 +13,17 @@
  */
 
 import { DecisionError } from './errors.ts'
-import { createDecisionResult, isDecisionCapability, type DecisionCandidate, type DecisionMode, type DecisionRankEntry, type DecisionRequest, type DecisionResult } from './types.ts'
+import {
+  createDecisionResult,
+  isDecisionCapability,
+  isDecisionConfidenceKind,
+  type DecisionCandidate,
+  type DecisionConfidenceKind,
+  type DecisionMode,
+  type DecisionRankEntry,
+  type DecisionRequest,
+  type DecisionResult,
+} from './types.ts'
 
 /** A request that passed validation, with the mode and candidate index resolved. */
 export interface ValidatedRequest {
@@ -103,11 +113,62 @@ export function validateRequest(request: DecisionRequest): ValidatedRequest {
   return { request, mode, byId }
 }
 
-/** Maximum acceptable confidence value; anything outside 0..1 is a provider bug. */
-function normalizeConfidence(value: unknown): number | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
-  if (value < 0 || value > 1) return undefined
-  return value
+/**
+ * Read a provider's confidence pair.
+ *
+ * The rule this enforces is the whole point of {@link DecisionConfidenceKind}:
+ * **a number and its kind travel together**. A provider that returns a bare
+ * number with no kind is rejected rather than guessed at, because the engine
+ * cannot know whether that number may be compared with its threshold. A
+ * provider that has no comparable confidence says `unavailable` and returns no
+ * number.
+ *
+ * @returns the validated pair, or a failure reason.
+ */
+function readConfidence(
+  value: unknown,
+  kind: unknown,
+  providerId: string,
+): { ok: true; confidence?: number; confidenceKind?: DecisionConfidenceKind } | { ok: false; message: string } {
+  const hasNumber = value !== undefined && value !== null
+  const hasKind = kind !== undefined && kind !== null
+
+  if (hasNumber && typeof value !== 'number') {
+    return { ok: false, message: `Provider "${providerId}" returned a non-numeric confidence.` }
+  }
+  const numeric = typeof value === 'number' && Number.isFinite(value) ? value : undefined
+  if (hasNumber && numeric === undefined) {
+    return { ok: false, message: `Provider "${providerId}" returned a non-finite confidence.` }
+  }
+  if (hasKind && !isDecisionConfidenceKind(kind)) {
+    return { ok: false, message: `Provider "${providerId}" returned unknown confidenceKind ${JSON.stringify(kind)}.` }
+  }
+  const confidenceKind = isDecisionConfidenceKind(kind) ? kind : undefined
+
+  if (numeric !== undefined && (numeric < 0 || numeric > 1)) {
+    return { ok: false, message: `Provider "${providerId}" returned confidence ${numeric}, outside 0..1.` }
+  }
+  if (numeric !== undefined && confidenceKind === undefined) {
+    return {
+      ok: false,
+      message: `Provider "${providerId}" returned a confidence without a confidenceKind, so the engine cannot tell `
+        + 'whether it is comparable with the configured threshold.',
+    }
+  }
+  if (numeric !== undefined && confidenceKind === 'unavailable') {
+    return { ok: false, message: `Provider "${providerId}" returned confidenceKind "unavailable" together with a number.` }
+  }
+  if (numeric === undefined && confidenceKind !== undefined && confidenceKind !== 'unavailable') {
+    return {
+      ok: false,
+      message: `Provider "${providerId}" declared confidenceKind "${confidenceKind}" but returned no confidence number.`,
+    }
+  }
+  return {
+    ok: true,
+    ...numeric === undefined ? {} : { confidence: numeric },
+    ...confidenceKind === undefined ? {} : { confidenceKind },
+  }
 }
 
 /** Sort comparator: highest score first, ties broken by original order (stable). */
@@ -208,7 +269,10 @@ export function normalizeDecisionResult(
     })
   }
 
-  const confidence = normalizeConfidence(value.confidence)
+  const confidence = readConfidence(value.confidence, value.confidenceKind, options.providerId)
+  if (!confidence.ok) {
+    throw new DecisionError('invalid_decision', confidence.message, { subject: options.providerId })
+  }
   const debug: DecisionResult['debug'] | undefined = options.includeDebug === true ? value.debug : undefined
 
   return createDecisionResult({
@@ -217,7 +281,8 @@ export function normalizeDecisionResult(
     selected: resolvedSelected,
     ranking,
     latencyMs: options.latencyMs,
-    ...confidence === undefined ? {} : { confidence },
+    ...confidence.confidence === undefined ? {} : { confidence: confidence.confidence },
+    ...confidence.confidenceKind === undefined ? {} : { confidenceKind: confidence.confidenceKind },
     ...debug === undefined ? {} : { debug: debug as DecisionResult['debug'] },
   })
 }

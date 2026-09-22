@@ -141,6 +141,8 @@ export interface EscalationResult {
   lastDecision?: {
     selected?: string
     confidence?: number
+    /** What that confidence was, so a caller does not read a raw number as normalized. */
+    confidenceKind?: string
     step?: number
   }
   /** What the caller should consider doing instead. */

@@ -98,8 +98,41 @@ export interface DecisionRankEntry {
 export interface DecisionResultDebug {
   /** Provider-specific raw response, verbatim (probabilities, per-question answers, …). */
   raw?: unknown
+  /**
+   * The provider's own confidence value, before normalization.
+   *
+   * This exists because confidence numbers are **not comparable across
+   * providers**: a language-model choice head reports a distribution
+   * statistic, a classifier reports a posterior, a rule engine may report a
+   * margin, and an RL policy may report a value estimate. Keeping the raw
+   * number here — rather than in {@link DecisionResult.confidence} — is what
+   * stops one provider's scale from being read as another's.
+   */
+  rawConfidence?: number
   /** Provider-specific notes (which rule fired, which fallback ran, …). */
   notes?: string[]
+}
+
+/**
+ * What kind of number {@link DecisionResult.confidence} is.
+ *
+ * - `normalized` — the provider mapped its own confidence onto a 0..1 scale
+ *   that is comparable across decisions, so the engine's global
+ *   `confidenceThreshold` applies.
+ * - `provider_raw` — the number is the provider's own, on its own scale. The
+ *   engine passes it through and **does not** gate on it, because comparing it
+ *   with a threshold calibrated for a different provider would be meaningless.
+ * - `unavailable` — this provider/mode cannot produce a comparable confidence.
+ *   Nothing gates on it, and a decision is still valid.
+ */
+export type DecisionConfidenceKind = 'normalized' | 'provider_raw' | 'unavailable'
+
+/** Every confidence kind, for validation and diagnostics. */
+export const DECISION_CONFIDENCE_KINDS: readonly DecisionConfidenceKind[] = ['normalized', 'provider_raw', 'unavailable']
+
+/** Whether `value` names a known confidence kind. */
+export function isDecisionConfidenceKind(value: unknown): value is DecisionConfidenceKind {
+  return typeof value === 'string' && (DECISION_CONFIDENCE_KINDS as readonly string[]).includes(value)
 }
 
 /**
@@ -115,8 +148,21 @@ export interface DecisionResult {
   selected?: string
   /** Full ordered preference, best first. Always includes every candidate the provider scored. */
   ranking?: DecisionRankEntry[]
-  /** Calibrated 0..1 confidence, when the provider can produce one. */
+  /**
+   * Confidence on a 0..1 scale, **together with** {@link confidenceKind}
+   * saying what that scale is.
+   *
+   * A consumer must never read this field without reading the kind: the same
+   * number means different things depending on which provider produced it and
+   * whether that provider normalized it.
+   */
   confidence?: number
+  /**
+   * What {@link confidence} is. Required whenever `confidence` is present —
+   * an unlabelled number is exactly the cross-provider ambiguity this field
+   * exists to remove.
+   */
+  confidenceKind?: DecisionConfidenceKind
   /** Wall-clock time spent inside the provider, in milliseconds. */
   latencyMs: number
   /** Provider-specific raw detail, present only when the request asked for debug output. */
@@ -129,6 +175,7 @@ export function createDecisionResult(
     selected?: string | undefined
     ranking?: DecisionRankEntry[] | undefined
     confidence?: number | undefined
+    confidenceKind?: DecisionConfidenceKind | undefined
     debug?: DecisionResultDebug | undefined
   },
 ): DecisionResult {
@@ -140,8 +187,55 @@ export function createDecisionResult(
   if (init.selected !== undefined) result.selected = init.selected
   if (init.ranking !== undefined) result.ranking = init.ranking
   if (init.confidence !== undefined) result.confidence = init.confidence
+  if (init.confidenceKind !== undefined) result.confidenceKind = init.confidenceKind
   if (init.debug !== undefined) result.debug = init.debug
   return result
+}
+
+/**
+ * One entry of a probability distribution, for a provider that has to derive a
+ * comparable confidence from its own numbers.
+ */
+export interface ProbabilityEntry {
+  id: string
+  probability: number
+}
+
+/**
+ * Derive a comparable 0..1 confidence from a probability distribution: how far
+ * the winning option stands above the runner-up, relative to everything
+ * considered.
+ *
+ * This is the normalization a provider with a *distribution* should use,
+ * because it measures the thing the engine's threshold is actually about —
+ * "is this decision dominant?" — instead of a dispersion statistic like
+ * entropy, whose value depends mostly on how many options were on the ballot.
+ * A 3-way choice split 0.46/0.41/0.14 and a 3-way choice split 0.97/0.02/0.01
+ * have very different entropy confidences but the same option count; only the
+ * margin separates them.
+ *
+ * @param entries - the distribution, in any order. Non-finite values are ignored.
+ * @returns `decided − runnerUp` normalized by the total, or `undefined` when
+ *   fewer than two usable entries exist (a single option is not a choice).
+ */
+export function normalizeConfidenceFromDistribution(entries: readonly ProbabilityEntry[]): number | undefined {
+  const usable = entries.filter(entry => Number.isFinite(entry.probability) && entry.probability > 0)
+  if (usable.length < 2) return undefined
+  const sorted = [...usable].sort((left, right) => right.probability - left.probability)
+  const top = sorted[0]
+  const second = sorted[1]
+  if (top === undefined || second === undefined) return undefined
+  const total = usable.reduce((sum, entry) => sum + entry.probability, 0)
+  if (total <= 0) return undefined
+  return clampUnit((top.probability - second.probability) / total)
+}
+
+/** Clamp to the closed unit interval; a non-finite input becomes 0. */
+export function clampUnit(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  if (value < 0) return 0
+  if (value > 1) return 1
+  return value
 }
 
 /** Provider self-report consumed by the engine's preflight and by health tooling. */

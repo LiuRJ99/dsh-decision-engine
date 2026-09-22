@@ -21,6 +21,7 @@ function harness(options: {
   decided: string | string[]
   providerId?: string
   confidence?: number
+  confidenceKind?: 'normalized' | 'provider_raw' | 'unavailable'
   environments?: EnvironmentAdapter[]
   runtimeConfig?: Parameters<typeof DecisionRuntime.prototype.resolveConfig>[0]
 }) {
@@ -37,7 +38,9 @@ function harness(options: {
         provider: options.providerId ?? 'scripted',
         mode: 'choice',
         selected,
-        ...options.confidence === undefined ? {} : { confidence: options.confidence },
+        ...options.confidence === undefined
+          ? {}
+          : { confidence: options.confidence, confidenceKind: options.confidenceKind ?? 'provider_raw' },
         latencyMs: 0,
       }
     },
@@ -168,6 +171,7 @@ describe('stop conditions', () => {
     const { runtime } = harness({
       decided: 'a',
       confidence: 0.1,
+      confidenceKind: 'normalized',
       environments: [adapter],
       runtimeConfig: { confidenceThreshold: 0.9 },
     })

@@ -245,9 +245,21 @@ describe('decision normalization', () => {
     )
   })
 
-  it('drops an out-of-range confidence rather than clamping a lie', () => {
-    const result = normalizeDecisionResult({ selected: 'submit', confidence: 7 }, { providerId: 'p', mode: 'choice', validated, latencyMs: 1 })
-    assert.equal(result.confidence, undefined)
+  it('rejects an out-of-range confidence rather than clamping a lie', () => {
+    assert.throws(
+      () => normalizeDecisionResult(
+        { selected: 'submit', confidence: 7, confidenceKind: 'normalized' },
+        { providerId: 'p', mode: 'choice', validated, latencyMs: 1 },
+      ),
+      (error: unknown) => error instanceof DecisionError && /outside 0\.\.1/.test(error.message),
+    )
+  })
+
+  it('rejects a confidence with no kind (the scale must be declared)', () => {
+    assert.throws(
+      () => normalizeDecisionResult({ selected: 'submit', confidence: 0.5 }, { providerId: 'p', mode: 'choice', validated, latencyMs: 1 }),
+      (error: unknown) => error instanceof DecisionError && /without a confidenceKind/.test(error.message),
+    )
   })
 
   it('keeps debug detail only when it was requested', () => {
@@ -273,14 +285,14 @@ describe('decision normalization', () => {
 
 describe('confidence threshold', () => {
   it('rejects a choice below the floor', async () => {
-    const engine = new DecisionEngine({ confidenceThreshold: 0.6 }, registryWith([constantProvider('submit', { confidence: 0.2 })]))
+    const engine = new DecisionEngine({ confidenceThreshold: 0.6 }, registryWith([constantProvider('submit', { confidence: 0.2, confidenceKind: 'normalized' })]))
     await assert.rejects(engine.decide(REQUEST), (error: unknown) => {
       return error instanceof DecisionError && error.code === 'low_confidence'
     })
   })
 
   it('accepts a choice above the floor', async () => {
-    const engine = new DecisionEngine({ confidenceThreshold: 0.6 }, registryWith([constantProvider('submit', { confidence: 0.9 })]))
+    const engine = new DecisionEngine({ confidenceThreshold: 0.6 }, registryWith([constantProvider('submit', { confidence: 0.9, confidenceKind: 'normalized' })]))
     const result = await engine.decide(REQUEST)
     assert.equal(result.selected, 'submit')
   })
@@ -292,7 +304,7 @@ describe('confidence threshold', () => {
   })
 
   it('allows a per-call override of the floor', async () => {
-    const engine = new DecisionEngine({ confidenceThreshold: 0.9 }, registryWith([constantProvider('submit', { confidence: 0.2 })]))
+    const engine = new DecisionEngine({ confidenceThreshold: 0.9 }, registryWith([constantProvider('submit', { confidence: 0.2, confidenceKind: 'normalized' })]))
     const result = await engine.decide(REQUEST, { confidenceThreshold: 0 })
     assert.equal(result.selected, 'submit')
   })
@@ -349,7 +361,7 @@ describe('provider failure paths', () => {
 describe('telemetry', () => {
   it('emits one record per decision with counts and timings, and never payloads', async () => {
     const { sink, records } = createRingBufferSink(10)
-    const engine = new DecisionEngine({ telemetry: sink }, registryWith([constantProvider('submit', { confidence: 0.7 })]))
+    const engine = new DecisionEngine({ telemetry: sink }, registryWith([constantProvider('submit', { confidence: 0.7, confidenceKind: 'normalized' })]))
     await engine.decide({ ...REQUEST, state: 'SECRET-PAGE-TEXT' })
     assert.equal(records.length, 1)
     const record = records[0]
@@ -357,6 +369,7 @@ describe('telemetry', () => {
     assert.equal(record?.provider, 'scripted')
     assert.equal(record?.selected, 'submit')
     assert.equal(record?.confidence, 0.7)
+    assert.equal(record?.confidenceKind, 'normalized', 'the record must say which scale the number is on')
     assert.equal(record?.candidateCount, 3)
     assert.ok((record?.timings.totalMs ?? -1) >= 0)
     assert.ok(!JSON.stringify(records).includes('SECRET-PAGE-TEXT'), 'telemetry must not carry state payloads')

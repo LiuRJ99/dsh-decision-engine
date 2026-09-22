@@ -65,26 +65,34 @@ export function argmax(probabilities: Record<string, number> | undefined): strin
   return best?.id
 }
 
-/** Entropy-based confidence over a probability distribution, when the SDK did not provide one. */
-export function confidenceFromProbabilities(probabilities: Record<string, number> | undefined): number | undefined {
-  if (probabilities === undefined) return undefined
-  const entries = Object.entries(probabilities).filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]))
-  if (entries.length < 2) return undefined
-  const total = entries.reduce((sum, [, value]) => sum + Math.max(0, value), 0)
-  if (total <= 0) return undefined
-  let entropy = 0
-  for (const [, value] of entries) {
-    const p = Math.max(0, value) / total
-    if (p > 0) entropy -= p * Math.log(p)
-  }
-  const normalized = entropy / Math.log(entries.length)
-  return clamp01(1 - normalized)
+/**
+ * Clamp the SDK's raw confidence into 0..1 without reinterpreting it.
+ *
+ * The provider deliberately does NOT map this onto a normalized scale. Two
+ * independent measurements on the real bundle
+ * (`examples/laya-head-calibration.mjs`, `examples/laya-confidence-calibration.mjs`)
+ * show there is nothing to map:
+ *
+ * - the choice head's own entropy-derived confidence barely moves across states
+ *   (0.039 for a state carrying no relevant information at all, 0.15 for a clear
+ *   decision), so it does not measure uncertainty;
+ * - the option-dominance alternative is deterministic per state but ranks a
+ *   deliberately torn decision (0.414) ABOVE a clear one (0.196), so it does not
+ *   measure decision quality either;
+ * - the head applies the temperature vector from `laya_config.json`
+ *   (`temperature: [1.64, 1.25, 1.98]`), so the reported probabilities are not
+ *   calibrated posteriors to begin with.
+ *
+ * Inventing a mapping over those numbers would produce a *normalized-looking*
+ * value with no relationship to confidence — worse than admitting there is
+ * none, because the engine would gate on it. The provider therefore reports
+ * `confidenceKind: 'provider_raw'` and the engine leaves the number alone.
+ */
+export function clampRawConfidence(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  return clamp01(value)
 }
 
-/** Confidence of a binary probability, as distance from the 0.5 midpoint. */
-export function confidenceFromBinary(pTrue: number): number {
-  return clamp01(Math.abs(clamp01(pTrue) - 0.5) * 2)
-}
 
 /** Clamp to the closed unit interval. */
 export function clamp01(value: number): number {

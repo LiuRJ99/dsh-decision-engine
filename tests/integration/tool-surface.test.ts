@@ -47,6 +47,7 @@ function composition(options: { decided?: string; config?: Config; extra?: Param
             }
       })(),
       confidence: 0.84,
+      confidenceKind: 'provider_raw',
       latencyMs: 3,
     }),
   })
@@ -95,7 +96,7 @@ describe('decision_decide without an environment', () => {
   })
 
   it('surfaces a low-confidence refusal as a DecisionError, not a decision', async () => {
-    const provider = new ScriptedProvider({ id: 'unsure', plan: () => ({ provider: 'unsure', mode: 'choice', selected: 'open', confidence: 0.1, latencyMs: 1 }) })
+    const provider = new ScriptedProvider({ id: 'unsure', plan: () => ({ provider: 'unsure', mode: 'choice', selected: 'open', confidence: 0.1, confidenceKind: 'normalized', latencyMs: 1 }) })
     const created = createDecisionEngineComposition({
       config: { defaultProvider: 'unsure', providers: { laya: { enabled: false } }, runtime: { confidenceThreshold: 0.8 } },
       dispatcher: createMapDispatcher({}),
@@ -133,7 +134,7 @@ describe('decision_decide with a custom environment', () => {
       id: 'stub',
       plan: (request) => {
         const pick = request.candidates.find(candidate => candidate.id === decided) ?? request.candidates[0]
-        return { provider: 'stub', mode: 'choice', ...pick === undefined ? {} : { selected: pick.id }, confidence: 0.9, latencyMs: 1 }
+        return { provider: 'stub', mode: 'choice', ...pick === undefined ? {} : { selected: pick.id }, confidence: 0.9, confidenceKind: 'provider_raw', latencyMs: 1 }
       },
     })
     const created = createDecisionEngineComposition({

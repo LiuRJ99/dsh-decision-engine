@@ -12,6 +12,25 @@
  * | `score`          | one `score` for the selected candidate  | level → 0..1 `confidence` + one-entry rank  |
  * | `classification` | `choice`, or one `noul` when binary     | winner (or p(true)) → `selected`           |
  *
+ * ## Confidence: what this provider does and does not claim
+ *
+ * Laya reports a confidence on its own scale (`1 − normalized entropy` for a
+ * `choice` answer, `P(true)` for `noul`). This provider publishes it verbatim
+ * with `confidenceKind: 'provider_raw'`, which tells the engine **not** to
+ * compare it with a normalized threshold. `debug.rawConfidence` carries the
+ * same number for a reader who wants it without the protocol field.
+ *
+ * That is a measured decision, not caution. On the real bundle the number does
+ * not track anything an action gate cares about: a state carrying no relevant
+ * information scores 0.039 while a clear decision scores 0.15, and the
+ * option-dominance alternative ranks a deliberately torn decision (0.414)
+ * above a clear one (0.196). See `clampRawConfidence` in `shared.ts` and
+ * `examples/laya-head-calibration.mjs` for the measurements.
+ *
+ * A provider that *can* produce a comparable confidence declares
+ * `confidenceKind: 'normalized'` instead; only those are gated. Adding a
+ * calibrated head to this provider later means changing that one label.
+ *
  * `noul` appears only in this file. It is a Laya-private concept: the core has
  * no capability for it, and the only thing that leaves this module is a
  * generic classification answer. The same is true of `criteria`,
@@ -30,9 +49,7 @@ import type { LayaAnswerShape, LayaQuestionShape, LayaSystemOneResult } from './
 import {
   argmax,
   choiceCriteria,
-  clamp01,
-  confidenceFromBinary,
-  confidenceFromProbabilities,
+  clampRawConfidence,
   renderCandidateList,
   serializeState,
 } from './shared.ts'
@@ -59,7 +76,10 @@ export interface TranslatedAnswer {
   selected: string | undefined
   /** Ranked entries, best first. */
   ranking: DecisionRankEntry[]
-  /** Normalized 0..1 confidence, when the model produced one. */
+  /**
+   * The model's own confidence, verbatim, on the model's own scale. Published
+   * as `confidenceKind: 'provider_raw'`; never gated on.
+   */
   confidence: number | undefined
   /** Normalized 0..1 score for the selected candidate, when the mode has one. */
   score: number | undefined
@@ -199,11 +219,12 @@ export function translateAnswers(
       throw new DecisionError('invalid_decision', 'Laya produced no usable option for the choice question.', { subject: 'laya' })
     }
     const ranking = rankingFromProbabilities(probabilities, candidateIds, selected)
-    const confidence = clamp01(answer.confidence ?? confidenceFromProbabilities(probabilities) ?? 0)
     return {
       selected,
       ranking,
-      confidence,
+      // Verbatim SDK confidence. Labelled `provider_raw` by `toResult`, so the
+      // engine reports it and never gates on it.
+      confidence: clampRawConfidence(answer.confidence),
       score: scoreOf(ranking, selected),
       raw: { [QUESTION_KEYS.select]: answer },
       notes,
@@ -215,7 +236,7 @@ export function translateAnswers(
     if (answer === undefined || typeof answer.noul !== 'number' || !Number.isFinite(answer.noul)) {
       throw new DecisionError('invalid_decision', 'Laya returned no numeric noul answer for the binary classification.', { subject: 'laya' })
     }
-    const pTrue = clamp01(answer.noul)
+    const pTrue = clampRawConfidence(answer.noul) ?? 0
     const first = candidateIds[0]
     const second = candidateIds[1]
     if (first === undefined || second === undefined) {
@@ -223,14 +244,17 @@ export function translateAnswers(
     }
     const selected = pTrue >= 0.5 ? first : second
     notes.push(`noul ${pTrue.toFixed(4)} mapped to the generic classification result (threshold 0.5).`)
+    const dominance = pTrue >= 0.5 ? pTrue : 1 - pTrue
     return {
       selected,
       ranking: [
-        { id: selected, score: pTrue >= 0.5 ? pTrue : 1 - pTrue },
-        { id: selected === first ? second : first, score: pTrue >= 0.5 ? 1 - pTrue : pTrue },
+        { id: selected, score: dominance },
+        { id: selected === first ? second : first, score: 1 - dominance },
       ],
-      confidence: confidenceFromBinary(pTrue),
-      score: pTrue >= 0.5 ? pTrue : 1 - pTrue,
+      // `noul` has no separate confidence field; the winning side's probability
+      // is the model's own number, reported as provider_raw like the rest.
+      confidence: clampRawConfidence(dominance),
+      score: dominance,
       raw: { [QUESTION_KEYS.binary]: answer },
       notes,
     }
@@ -253,8 +277,8 @@ export function translateAnswers(
     }
     const clamped = Math.min(maxLevel, Math.max(0, level))
     if (clamped !== level) notes.push(`Score ${level} for "${candidateId}" was clamped to the ${config.scoreLevels.length}-level scale.`)
-    entries.push({ id: candidateId, score: clamp01(clamped / maxLevel) })
-    if (typeof answer?.confidence === 'number' && Number.isFinite(answer.confidence)) confidences.push(clamp01(answer.confidence))
+    entries.push({ id: candidateId, score: clamped / maxLevel })
+    if (typeof answer?.confidence === 'number' && Number.isFinite(answer.confidence)) confidences.push(answer.confidence)
   }
   if (entries.length === 0) {
     throw new DecisionError('invalid_decision', 'Laya returned no usable score for any candidate.', { subject: 'laya' })
@@ -264,11 +288,16 @@ export function translateAnswers(
   if (selected === undefined) {
     throw new DecisionError('invalid_decision', 'Laya produced no ranked candidate.', { subject: 'laya' })
   }
+  // A rating question returns a level, not a distribution, so there is no
+  // comparable dominance to report. The per-question confidences are the SDK's
+  // own scale and stay in the raw payload; `confidenceKind` will be
+  // `unavailable`, which is exactly what "this answer shape cannot produce a
+  // comparable confidence" means.
   const meanConfidence = confidences.length === 0 ? undefined : confidences.reduce((sum, value) => sum + value, 0) / confidences.length
   return {
     selected,
     ranking,
-    confidence: meanConfidence,
+    confidence: meanConfidence === undefined ? undefined : clampRawConfidence(meanConfidence),
     score: scoreOf(ranking, selected),
     raw,
     notes,
@@ -310,17 +339,26 @@ export function toResult(
   translated: TranslatedAnswer,
   options: { providerId: string; mode: DecisionMode; latencyMs: number; includeDebug: boolean },
 ): DecisionResult {
+  const debug = {
+    ...options.includeDebug ? { raw: translated.raw } : {},
+    ...translated.confidence === undefined ? {} : { rawConfidence: translated.confidence },
+    ...translated.notes.length === 0 ? {} : { notes: translated.notes },
+  }
+  const hasDebug = options.includeDebug || translated.confidence !== undefined || translated.notes.length > 0
+  // Every confidence this provider produces is on Laya's own scale, so it is
+  // labelled `provider_raw`: the engine reports it and never compares it with a
+  // normalized threshold. When the SDK gives no number at all the label is
+  // `unavailable` — an honest absence, not a zero. A calibrated head added to
+  // this provider later changes this one line.
+  const confidenceKind = translated.confidence === undefined ? 'unavailable' as const : 'provider_raw' as const
   return {
     provider: options.providerId,
     mode: options.mode,
     ...translated.selected === undefined ? {} : { selected: translated.selected },
     ranking: translated.ranking,
     ...translated.confidence === undefined ? {} : { confidence: translated.confidence },
+    confidenceKind,
     latencyMs: options.latencyMs,
-    ...options.includeDebug
-      ? { debug: { raw: translated.raw, ...translated.notes.length === 0 ? {} : { notes: translated.notes } } }
-      : translated.notes.length === 0
-        ? {}
-        : { debug: { notes: translated.notes } },
+    ...hasDebug ? { debug } : {},
   }
 }
