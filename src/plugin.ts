@@ -90,7 +90,7 @@ export class HostToolDispatcher implements ToolDispatcher {
 
 /** The agent to attribute a nested dispatch to, when the host exposes one on the context. */
 function requestAgent(ctx: Context): Agent | undefined {
-  const candidate = (ctx as unknown as { agent?: unknown }).agent
+  const candidate = ctx.get('agent')
   return candidate === undefined || candidate === null ? undefined : candidate as Agent
 }
 
