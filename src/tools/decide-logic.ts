@@ -79,6 +79,8 @@ export interface DecideToolOutput {
   confidenceKind?: DecisionConfidenceKind
   /** The provider's own confidence, on the provider's own scale. Never gated on. */
   rawConfidence?: number
+  /** Input tokens the provider reported for this call, when it reported any. */
+  inputTokens?: number
   latencyMs?: number
   /** Mapped action preview — what the decision means in the environment. */
   action?: {
@@ -288,6 +290,7 @@ export function projectOutcome(outcome: RuntimeOutcome): DecideToolOutput {
       ...outcome.decision.selected === undefined ? {} : { selected: outcome.decision.selected },
       ...outcome.decision.confidence === undefined ? {} : { confidence: outcome.decision.confidence },
       ...outcome.decision.confidenceKind === undefined ? {} : { confidenceKind: outcome.decision.confidenceKind },
+      ...outcome.decision.usage?.inputTokens === undefined ? {} : { inputTokens: outcome.decision.usage.inputTokens },
       ...outcome.decision.debug?.rawConfidence === undefined ? {} : { rawConfidence: outcome.decision.debug.rawConfidence },
       ...outcome.decision.debug === undefined ? {} : { debug: toJsonObject(outcome.decision.debug) },
     },
@@ -327,6 +330,7 @@ export function renderDecideOutput(output: DecideToolOutput): string {
     lines.push(`Provider raw confidence (own scale, not gated): ${output.rawConfidence.toFixed(3)}`)
   }
   if (output.latencyMs !== undefined) lines.push(`Provider latency: ${output.latencyMs}ms`)
+  if (output.inputTokens !== undefined) lines.push(`Input tokens: ${output.inputTokens}`)
   if (output.candidates !== undefined && output.candidates.length > 0) lines.push(`Ranked candidates: ${output.candidates.join(' > ')}`)
   if (output.action !== undefined) {
     const target = output.action.target === undefined ? '' : ` target=${String(output.action.target)}`
@@ -403,6 +407,7 @@ export async function executeDecide(input: DecideToolInput, context: DecideToolC
     candidates: ranked.length > 0 ? ranked : input.candidates.map(candidate => candidate.id),
     ...result.confidence === undefined ? {} : { confidence: result.confidence },
     ...result.confidenceKind === undefined ? {} : { confidenceKind: result.confidenceKind },
+    ...result.usage?.inputTokens === undefined ? {} : { inputTokens: result.usage.inputTokens },
     ...result.debug?.rawConfidence === undefined ? {} : { rawConfidence: result.debug.rawConfidence },
     latencyMs: result.latencyMs,
     ...result.debug === undefined ? {} : { debug: toJsonObject(result.debug) },

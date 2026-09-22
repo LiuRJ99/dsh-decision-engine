@@ -70,6 +70,8 @@ export interface DecideToolOutput {
     confidenceKind?: DecisionConfidenceKind;
     /** The provider's own confidence, on the provider's own scale. Never gated on. */
     rawConfidence?: number;
+    /** Input tokens the provider reported for this call, when it reported any. */
+    inputTokens?: number;
     latencyMs?: number;
     /** Mapped action preview — what the decision means in the environment. */
     action?: {
