@@ -16,6 +16,10 @@
       "types": "./lib/types/plugin.d.ts",
       "default": "./lib/plugin.js"
     },
+    "./embed": {
+      "types": "./lib/types/embed.d.ts",
+      "default": "./lib/embed.js"
+    },
     "./composition": {
       "types": "./lib/types/composition.d.ts",
       "default": "./lib/composition.js"
@@ -28,9 +32,9 @@
       "types": "./lib/types/runtime/index.d.ts",
       "default": "./lib/runtime/index.js"
     },
-    "./providers/laya": {
-      "types": "./lib/types/providers/laya/index.d.ts",
-      "default": "./lib/providers/laya/index.js"
+    "./environments": {
+      "types": "./lib/types/environments/registry.d.ts",
+      "default": "./lib/environments/registry.js"
     },
     "./environments/browser": {
       "types": "./lib/types/environments/browser/adapter.d.ts",
@@ -44,12 +48,12 @@
       "types": "./lib/types/environments/custom/adapter.d.ts",
       "default": "./lib/environments/custom/adapter.js"
     },
+    "./providers/laya": {
+      "types": "./lib/types/providers/laya/index.d.ts",
+      "default": "./lib/providers/laya/index.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json",
-    "./embed": {
-      "types": "./lib/types/embed.d.ts",
-      "default": "./lib/embed.js"
-    }
+    "./package.json": "./package.json"
   },
   "files": [
     "lib",

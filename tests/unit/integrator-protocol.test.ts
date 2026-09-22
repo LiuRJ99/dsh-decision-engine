@@ -278,3 +278,50 @@ describe('the spec document matches the shipped surface', () => {
     assert.equal(outcome.action.candidateId, 'go-1')
   })
 })
+
+describe('a DecisionError is recognizable across export entries', () => {
+  it('brands every copy of the class', async () => {
+    const { DecisionError, DECISION_ERROR_BRAND } = await import('../../src/core/errors.ts')
+    const error = new DecisionError('no_candidates', 'x')
+    assert.equal(error.brand, DECISION_ERROR_BRAND)
+    assert.equal(DecisionError.brand, DECISION_ERROR_BRAND)
+  })
+
+  it('survives structural narrowing, which instanceof cannot do across bundles', async () => {
+    const { isDecisionError, DECISION_ERROR_BRAND } = await import('../../src/core/errors.ts')
+    // A copy of the class from another bundled entry: same shape, different identity.
+    class OtherCopy extends Error {
+      readonly brand = DECISION_ERROR_BRAND
+      readonly code = 'low_confidence'
+    }
+    assert.equal(isDecisionError(new OtherCopy('x')), true)
+    assert.equal(isDecisionError(new Error('x')), false)
+    assert.equal(isDecisionError(undefined), false)
+    assert.equal(isDecisionError({ name: 'Error', code: 'low_confidence' }), false)
+  })
+
+  it('accepts a pre-brand copy rebuilt by a bridge', async () => {
+    const { isDecisionError } = await import('../../src/core/errors.ts')
+    // No brand, but the name and a code — a bridge that re-created the error.
+    assert.equal(isDecisionError({ name: 'DecisionError', code: 'no_candidates', message: 'x' }), true)
+  })
+
+  it('makes instanceof work even for a foreign copy', async () => {
+    const { DecisionError, DECISION_ERROR_BRAND } = await import('../../src/core/errors.ts')
+    class OtherCopy extends Error {
+      readonly brand = DECISION_ERROR_BRAND
+      readonly code = 'aborted'
+    }
+    assert.equal(new OtherCopy('x') instanceof DecisionError, true, 'Symbol.hasInstance must cover this')
+  })
+
+  it('toDecisionFailure reads a foreign copy instead of downgrading it to internal', async () => {
+    const { toDecisionFailure, DECISION_ERROR_BRAND } = await import('../../src/core/errors.ts')
+    class OtherCopy extends Error {
+      readonly brand = DECISION_ERROR_BRAND
+      readonly code = 'unknown_candidate'
+      toJSON() { return { code: this.code, message: this.message } }
+    }
+    assert.equal(toDecisionFailure(new OtherCopy('nope')).code, 'unknown_candidate')
+  })
+})

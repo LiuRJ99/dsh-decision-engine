@@ -66,6 +66,19 @@ export type DecisionErrorCode =
   /** Anything the layer could not classify; always carries a message. */
   | 'internal'
 
+/**
+ * Brand that identifies a {@link DecisionError} across module copies.
+ *
+ * The package is bundled once per export entry, so `lib/core/index.js` and
+ * `lib/plugin.js` each carry their own `DecisionError` class and
+ * `errorA instanceof ErrorB` is **false** even though both are this error. An
+ * integrator hit exactly that and silently downgraded every `no_candidates` to
+ * `internal`. The brand is a plain string property so it survives serialization
+ * and structural typing; read it (or `error.code`) instead of relying on
+ * identity.
+ */
+export const DECISION_ERROR_BRAND = 'dsh-decision-engine/decision-error' as const
+
 /** Stable, serializable failure value. */
 export interface DecisionFailure {
   code: DecisionErrorCode
@@ -82,6 +95,13 @@ export interface DecisionFailure {
  * serializable {@link DecisionFailure}.
  */
 export class DecisionError extends Error {
+  /**
+   * Present on every copy of this class, so a `DecisionError` thrown by one
+   * export entry is recognizable from another without sharing a class identity.
+   */
+  static readonly brand: typeof DECISION_ERROR_BRAND = DECISION_ERROR_BRAND
+  /** Instance-side brand, for a structural check. */
+  readonly brand: typeof DECISION_ERROR_BRAND = DECISION_ERROR_BRAND
   readonly code: DecisionErrorCode
   readonly subject: string | undefined
   readonly details: Record<string, unknown> | undefined
@@ -92,6 +112,20 @@ export class DecisionError extends Error {
     this.code = code
     this.subject = options?.subject
     this.details = options?.details
+  }
+
+  /**
+   * Whether a value is a `DecisionError` from **any** copy of this package.
+   *
+   * Also makes `instanceof` work across bundled copies (see
+   * {@link DECISION_ERROR_BRAND}).
+   */
+  static isDecisionError(value: unknown): value is DecisionError {
+    return isDecisionError(value)
+  }
+
+  static override [Symbol.hasInstance](value: unknown): boolean {
+    return isDecisionError(value)
   }
 
   /** The serializable form. Never throws. */
@@ -105,9 +139,26 @@ export class DecisionError extends Error {
   }
 }
 
+/**
+ * Whether a value is a decision failure, whatever copy of the package produced
+ * it.
+ *
+ * Use this (or read `error.code`) instead of `instanceof` when the error may
+ * cross an export entry — the DSH plugin and an embedder loading different
+ * entries is the normal case, not an exotic one.
+ */
+export function isDecisionError(value: unknown): value is DecisionError {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as { brand?: unknown; code?: unknown; name?: unknown }
+  if (candidate.brand === DECISION_ERROR_BRAND) return true
+  // A structurally identical error from a copy bundled before the brand existed,
+  // or rebuilt by a bridge: name + a known code is enough to treat it as ours.
+  return candidate.name === 'DecisionError' && typeof candidate.code === 'string'
+}
+
 /** Narrow any thrown value to a {@link DecisionFailure}. */
 export function toDecisionFailure(error: unknown, fallback: DecisionErrorCode = 'internal'): DecisionFailure {
-  if (error instanceof DecisionError) return error.toJSON()
+  if (isDecisionError(error)) return error.toJSON()
   if (error instanceof Error) {
     return {
       code: fallback,
@@ -118,9 +169,9 @@ export function toDecisionFailure(error: unknown, fallback: DecisionErrorCode = 
   return { code: fallback, message: String(error) }
 }
 
-/** Whether `error` is the given decision failure code. */
+/** Whether `error` is the given decision failure code, across package copies. */
 export function isDecisionErrorCode(error: unknown, code: DecisionErrorCode): boolean {
-  return error instanceof DecisionError && error.code === code
+  return isDecisionError(error) && error.code === code
 }
 
 /**

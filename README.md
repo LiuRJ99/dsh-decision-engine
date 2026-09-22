@@ -51,6 +51,8 @@ Browser / Computer / Custom 三个环境适配器**一行都不用改**。
 > ```
 >
 > 完整契约（两套角色、错误模型、HTTP 线格式、检查清单）在那个文档里。
+> 捕获错误请用 `isDecisionError(error)` 或直接读 `error.code`，**不要用 `instanceof`** ——
+> 本包逐入口打包，跨入口的类身份不成立。
 
 ---
 
