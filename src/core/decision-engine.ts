@@ -144,6 +144,11 @@ export class DecisionEngine {
     return this.#config.confidenceThreshold
   }
 
+  /** Per-decision ceiling, also honored inside a longer task. */
+  get timeoutMs(): number {
+    return this.#config.timeoutMs
+  }
+
   /**
    * Apply a configuration change to the live engine.
    *

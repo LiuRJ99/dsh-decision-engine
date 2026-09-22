@@ -15,7 +15,7 @@ import type { DecisionEngine, EngineDecideOptions } from './core/decision-engine
 import type { DecisionProviderRegistry } from './core/provider-registry.ts'
 import type { DecisionRequest, DecisionResult, ProviderHealth } from './core/types.ts'
 import type { EnvironmentRegistry } from './environments/registry.ts'
-import type { DecisionRuntime, RunOptions, RuntimeOutcome } from './runtime/runner.ts'
+import type { DecisionRuntime, RunOptions, RuntimeOutcome, TaskOptions, TaskOutcome } from './runtime/runner.ts'
 import type { DecisionTelemetry } from './core/telemetry.ts'
 
 /** Health of the whole layer, as reported to a host or a diagnostic tool. */
@@ -59,6 +59,8 @@ export interface DecisionEngineService {
   decide(request: DecisionRequest, options?: EngineDecideOptions): Promise<DecisionResult>
   /** Drive an environment through the runtime. */
   run(options: RunOptions): Promise<RuntimeOutcome>
+  /** Take over a whole task, returning only at completion or escalation. */
+  runTask(options: TaskOptions): Promise<TaskOutcome>
   /** Whether a capability family is unlocked for this session, when a gate is mounted. */
   isCapabilityUnlocked(capability: 'browser' | 'computer'): boolean | undefined
   /** Aggregate health. */

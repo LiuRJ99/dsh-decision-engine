@@ -366,6 +366,7 @@ export function createDecisionEngineComposition(options: {
     },
     decide: (request, decideOptions) => engine.decide(request, decideOptions),
     run: runOptions => runtime.run(runOptions),
+    runTask: taskOptions => runtime.runTask(taskOptions),
     isCapabilityUnlocked: capability => options.readCapabilityGate?.(capability),
     health: async (): Promise<DecisionEngineHealth> => {
       const providerHealth = await providers.health()
@@ -402,8 +403,8 @@ export function createDecisionEngineComposition(options: {
     runtime,
     telemetryRecords: records,
     dispose: async () => {
-      for (const dispose of disposers.reverse()) dispose()
       await service.dispose()
+      for (const dispose of disposers.reverse()) dispose()
     },
   }
 }

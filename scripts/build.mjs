@@ -39,6 +39,7 @@ const ENTRIES = [
   { entry: 'src/environments/computer/adapter.ts', outfile: 'lib/environments/computer/adapter.js' },
   { entry: 'src/environments/computer/ax-tree.ts', outfile: 'lib/environments/computer/ax-tree.js' },
   { entry: 'src/environments/custom/adapter.ts', outfile: 'lib/environments/custom/adapter.js' },
+  { entry: 'src/environments/http/adapter.ts', outfile: 'lib/environments/http/adapter.js' },
   { entry: 'src/environments/registry.ts', outfile: 'lib/environments/registry.js' },
   { entry: 'src/providers/laya/index.ts', outfile: 'lib/providers/laya/index.js' },
   { entry: 'src/gate.ts', outfile: 'lib/gate.js' },

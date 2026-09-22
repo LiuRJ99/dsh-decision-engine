@@ -1,5 +1,5 @@
 /**
- * End-to-end tool verification: execute the real `decision_decide` tool through
+ * End-to-end tool verification: execute both public decision tools through
  * a real host tool registry, with a registered environment, and assert that the
  * whole path a model call takes works.
  *
@@ -103,10 +103,10 @@ ctx.decisionEngine.environments.register(new CustomEnvironmentAdapter({
   },
 }))
 
-async function callTool(arguments_) {
+async function callTool(arguments_, name = 'decision_decide') {
   return ctx.tools.execute({
     callId: `verify:${providerCalls.length}:${moves}`,
-    name: 'decision_decide',
+    name,
     arguments: arguments_,
     signal: new AbortController().signal,
   })
@@ -141,6 +141,17 @@ const loop = await callTool({ environment: 'demo-game', objective: 'Advance.', e
 check('execute: "loop" runs the bounded loop and stops at maxSteps', loop.value?.status === 'needs_escalation' && moves === 4, `status=${loop.value?.status} moves=${moves} reason=${loop.value?.guidance ?? ''}`)
 check('a budget stop carries guidance for the main agent', /re-plan|budget/i.test(String(loop.value?.guidance ?? '')), String(loop.value?.guidance ?? ''))
 
+// A complete plan passes through the real host schema, executor and renderer.
+const task = await callTool({
+  environment: 'demo-game', objective: 'Finish the supplied plan.',
+  plan: [
+    { id: 'prepare', objective: 'Advance to move six.', completion: { path: 'moves', equals: 6 } },
+    { id: 'finish', objective: 'Advance to move seven.', completion: { path: 'moves', equals: 7 } },
+  ],
+}, 'decision_run')
+check('decision_run executes a whole plan through the host registry', task.isError === false && task.value?.status === 'done' && moves === 7, JSON.stringify(task.value ?? task.error))
+check('the task report includes completed stages and final observed state', task.value?.completedPlanSteps?.join(',') === 'prepare,finish' && task.value?.finalState?.moves === 7)
+
 // --- refusals --------------------------------------------------------------
 const badCandidates = await callTool({ objective: 'x', state: { a: 1 }, candidates: [] })
 check('an empty candidate set is refused before dispatch', badCandidates.isError === true, JSON.stringify(badCandidates.error).slice(0, 120))
@@ -150,6 +161,8 @@ check('an unknown environment is refused with the registered ids named', unknown
 // --- provider isolation ----------------------------------------------------
 const serialized = JSON.stringify(providerCalls)
 check('the provider never learns a tool name', !/browser_|computer_use_|demo-game\./.test(serialized), `${providerCalls.length} provider call(s) inspected`)
+
+await ctx.decisionEngine.dispose()
 
 console.log('')
 const failed = results.filter(result => !result.ok)

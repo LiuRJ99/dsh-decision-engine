@@ -104,6 +104,8 @@ export declare class DecisionEngine {
     get router(): DecisionRouter;
     /** The configured confidence floor. */
     get confidenceThreshold(): number;
+    /** Per-decision ceiling, also honored inside a longer task. */
+    get timeoutMs(): number;
     /**
      * Apply a configuration change to the live engine.
      *

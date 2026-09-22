@@ -7,6 +7,13 @@ A general-purpose, model-agnostic **decision layer** for
 low-latency System-1 runtime that sits between an environment and the actions
 taken in it.
 
+Use `decision_decide` for an individual choice or action. For a complete task,
+the main agent supplies its goal, ordered plan and completion conditions to
+`decision_run` once. The small model executes the plan through browser tools,
+desktop tools or an environment API, then returns the result for verification.
+There is no main-agent relay between actions. See the [task takeover protocol](docs/任务接管协议.md)
+for the flowchart, task schema, HTTP contract and runnable HTML example.
+
 ```text
 Environment  →  Environment Adapter  →  Decision Request  →  Decision Engine
                                                                    ↓
@@ -54,7 +61,7 @@ dsh --profile web-candidate --dump-config      # verify, then promote
 ```
 
 The package declares `dsh.bundle.patch` → `cordis.patch.yml`, which inserts one
-host-plane row. The single `decision_decide` tool and the `decision-control`
+host-plane row. The `decision_decide` and `decision_run` tools and the `decision-control`
 skill are registered by that row.
 
 `lib/` is **committed**, matching the other DSH plugins in this workspace: a
@@ -237,17 +244,16 @@ tool registry, or any of its services. One call embeds the same layer:
 ```js
 import { createDecisionLayer } from 'dsh-decision-engine/embed'
 
-const decisions = createDecisionLayer({ modelDir: '/path/to/bundle' })
+const decisions = createDecisionLayer({ laya: { modelDir: '/path/to/bundle' } })
 decisions.environments.register(myGameAdapter)
 
-const outcome = await decisions.decideEnvironment({
+const outcome = await decisions.runTask({
   environment: 'my-game',
   objective: 'Win this round.',
-  mode: 'single-step',       // or 'decision-only' / 'bounded-loop'
 })
 ```
 
-`decideEnvironment` returns the escalation as a **value** (serializable, with
+`runTask` and `decideEnvironment` return runtime escalations as a **value** (serializable, with
 `guidance`) instead of throwing — the shape a bridge forwards. `decide` keeps
 throwing for a caller that wants the `code`.
 
@@ -262,7 +268,7 @@ throwing for a caller that wants the `code`.
 
 | Id | Transport | Reads | Refuses to guess when |
 | --- | --- | --- | --- |
-| `browser` | registered `browser_*` tools | structured snapshot text: title, url, numbered interactive inventory, form fields | canvas/WebGL-only pages, no interactive elements, unparseable snapshot |
+| `browser` | registered `browser_*` tools | structured snapshot text: title, url, numbered interactive inventory, form fields | canvas/WebGL-only pages, unparseable snapshots, unfinished pages without actions |
 | `computer` | `ctx.computer` seam, or `computer_use_*` tools | the daemon's accessibility tree text and element indexes | anonymous-group-only trees, a diff with no full capture to merge onto, no addressable nodes |
 | custom | the environment's own callbacks | whatever structured state it exposes | it exposes none |
 

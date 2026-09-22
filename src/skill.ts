@@ -21,7 +21,7 @@ export const DECISION_CONTROL_SKILL_NAME = 'decision-control'
 /** The shipped skill body. Kept as a literal so no file read is needed at load time. */
 export const DECISION_CONTROL_SKILL = {
   name: DECISION_CONTROL_SKILL_NAME,
-  description: 'Use the decision layer: fast, low-latency choices over a finite candidate set, and single-step or bounded-loop control of a browser, desktop, or custom environment.',
+  description: 'Plan with the main agent, execute with a decision model: individual choices, single steps, or complete browser, desktop and API tasks.',
   whenToUse: 'Invoke /decision-control when a task is a repeated choice among a known finite set of options, or when a '
     + 'browser/app/game flow should be driven step by step by a small decision model instead of by planning on every turn.',
   content: `# Decision Control
@@ -30,7 +30,26 @@ Use the decision layer when the next step is a *choice among known options*, not
 fast, deterministic in shape, and bounded: it selects, ranks, or scores the candidates you give it, and it never
 invents an action.
 
-## The one tool
+## Whole-task delegation
+
+The main agent plans; the small model executes the plan; the main agent verifies the final result.
+For a whole task, call \`decision_run\` ONCE with \`objective\`, \`environment\` or \`endpoint\`, and an ordered
+\`plan\`. Each plan stage has \`id\`, \`objective\`, and a \`completion\` rule over observed state. A rule uses
+\`path\` plus exactly one of \`equals\` or \`includes\`. For browser page text use \`path: "main"\`.
+
+The executor reads state directly, selects actions with the decision model, dispatches them, and advances
+the plan when the observed completion condition matches. It owns all intermediate clicks, submissions,
+and next-question operations. Do not relay questions, click next yourself, or invoke it once per move.
+Verify the returned result after completion; intervene only after an escalation.
+
+An API environment can report its own terminal state and score. In that case \`plan\` is optional.
+For an unplanned browser/desktop task, supply an explicit \`completion\` rule.
+Defaults are 1000 actions and 10 minutes; \`maxSteps\` and \`maxDurationMs\` can override them (DSH maximum 30 minutes).
+The result includes \`status\`, \`result\`, \`finalState\`, and \`completedPlanSteps\`; an early failure also identifies
+the \`activePlanStep\`. \`done\` means the environment ended or a supplied completion condition matched;
+check the result to distinguish success from a terminal failure.
+
+## Individual decisions and steps
 
 \`decision_decide\` covers all three levels:
 
@@ -53,7 +72,8 @@ invents an action.
   groups. The layer returns \`needs_escalation\` with reason \`insufficient_observation\` or
   \`environment_unsupported\` — take the step over yourself. Do not retry hoping for a different answer.
 - The task needs vision, OCR, or screenshot reading. This layer is text-only by design.
-- The task needs real planning, or the next action cannot be written down as a finite candidate set.
+- The next action cannot be written down as a finite candidate set. Keep planning in the main agent and
+  delegate execution only after the plan and observable completion conditions are clear.
 
 ## Reading the result
 

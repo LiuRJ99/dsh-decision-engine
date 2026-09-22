@@ -50,6 +50,7 @@ export interface CustomExecutionResult {
   state?: unknown
   /** Whether the environment now considers the objective met. */
   done?: boolean
+  result?: Record<string, unknown>
 }
 
 /** The callbacks a custom environment supplies. */
@@ -71,6 +72,8 @@ export interface CustomEnvironmentSpec<State = unknown> {
   execute(candidate: CustomCandidate<State>, input?: ExecuteInput): Promise<CustomExecutionResult> | CustomExecutionResult
   /** Whether the objective is already met. Optional. */
   isDone?(state: State, objective: Objective): Promise<boolean> | boolean
+  /** Extract a score/outcome for the final task report. */
+  result?(state: State): Record<string, unknown>
   /** Objective text for the provider when the caller did not supply a specific one. */
   defaultObjective?: string
   /** Optional human-readable one-line summary of a state. */
@@ -102,6 +105,7 @@ export class CustomEnvironmentAdapter<State = unknown> implements EnvironmentAda
    * `unknown_candidate`.
    */
   #offered: Map<string, CustomCandidate<State>>[] = []
+  readonly #observationCandidates = new WeakMap<Observation, Map<string, CustomCandidate<State>>>()
   /**
    * The candidate each action was mapped from.
    *
@@ -145,6 +149,7 @@ export class CustomEnvironmentAdapter<State = unknown> implements EnvironmentAda
     }
     this.#lastState = state
     return okObservation('custom', state, {
+      ...this.#spec.result === undefined ? {} : { result: this.#spec.result(state) },
       ...this.#spec.summarize === undefined ? {} : { summary: this.#spec.summarize(state) },
       metadata: { environment: this.id },
     })
@@ -169,7 +174,9 @@ export class CustomEnvironmentAdapter<State = unknown> implements EnvironmentAda
     }
     // Newest last, bounded: enough history to map a decision that was built a
     // few requests ago, without growing without limit on a long-lived adapter.
-    this.#offered.push(new Map(available.map(candidate => [candidate.id, candidate])))
+    const byId = new Map(available.map(candidate => [candidate.id, structuredCloneCandidate(candidate)]))
+    this.#observationCandidates.set(observation, byId)
+    this.#offered.push(byId)
     if (this.#offered.length > OFFERED_HISTORY) this.#offered.shift()
     const projected = this.#spec.projectState === undefined ? state : this.#spec.projectState(state)
     const objectiveText = objective.description === '' ? this.#spec.defaultObjective : objective.description
@@ -193,14 +200,13 @@ export class CustomEnvironmentAdapter<State = unknown> implements EnvironmentAda
     if (selected === undefined) {
       throw new DecisionError('invalid_decision', `Provider "${result.provider}" returned no selection.`, { subject: result.provider })
     }
-    const candidate = this.#findCandidate(selected)
+    const candidate = this.#observationCandidates.get(observation)?.get(selected)
     if (candidate === undefined) {
       throw new DecisionError('unknown_candidate', `Decision "${selected}" does not map to an action of environment "${this.id}".`, {
         subject: this.id,
         details: { selected, offered: [...(this.#offered.at(-1)?.keys() ?? [])] },
       })
     }
-    void observation
     const action: EnvironmentAction = {
       kind: 'custom',
       candidateId: candidate.id,
@@ -301,6 +307,13 @@ export class CustomEnvironmentAdapter<State = unknown> implements EnvironmentAda
 
 /** How many recent candidate sets an adapter remembers for mapping. */
 const OFFERED_HISTORY = 8
+
+function structuredCloneCandidate<State>(candidate: CustomCandidate<State>): CustomCandidate<State> {
+  return {
+    ...candidate,
+    ...candidate.action === undefined ? {} : { action: structuredClone(candidate.action) },
+  }
+}
 
 /**
  * Coerce an arbitrary structured state into something the decision protocol

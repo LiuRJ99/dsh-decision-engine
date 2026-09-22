@@ -20,10 +20,11 @@
  */
 
 import type { DecisionEngine } from '../core/decision-engine.ts'
-import { DecisionError, toDecisionFailure, toEscalation, type DecisionErrorCode, type EscalationResult } from '../core/errors.ts'
+import { DecisionError, toDecisionFailure, toEscalation, type EscalationResult } from '../core/errors.ts'
 import type { DecisionTelemetrySink, DecisionTimings } from '../core/telemetry.ts'
+import { randomUUID } from 'node:crypto'
 import type { DecisionMode, DecisionResult } from '../core/types.ts'
-import type { ActionResult, EnvironmentAction, EnvironmentAdapter, ExecuteInput, Objective, Observation } from '../environments/types.ts'
+import type { ActionResult, EnvironmentAction, EnvironmentAdapter, Objective, Observation } from '../environments/types.ts'
 import type { EnvironmentRegistry } from '../environments/registry.ts'
 
 /** How far the runtime is promoted. Nothing runs loops in `decision-only`. */
@@ -51,7 +52,7 @@ export interface RuntimeConfig {
   confidenceThreshold: number
   /** How many consecutive steps without a state change trigger `no_progress`. Defaults to 3. */
   noProgressLimit: number
-  /** How many times the same action may be chosen in a row before `repeated_decision`. Defaults to 3. */
+  /** Repeat limit; 0 disables it. Task takeover defaults to 0, legacy loops to 3. */
   repeatedDecisionLimit: number
   /** Per-observation budget in milliseconds. */
   observeTimeoutMs: number
@@ -111,6 +112,21 @@ export interface RuntimeOutcome {
   escalation?: EscalationResult
   /** Reason for a non-`needs_escalation` early stop (`done` via the adapter's own check). */
   stopReason?: string
+  /** Last observed state and environment-reported score/outcome. */
+  finalState?: unknown
+  result?: Record<string, unknown>
+  /** Progress through the caller's plan; no intermediate main-agent turn. */
+  completedPlanSteps?: string[]
+  activePlanStep?: string
+}
+
+/** A main-agent-planned stage. The executor chooses actions within this stage. */
+export interface TaskPlanStep {
+  id: string
+  objective: string
+  completion: NonNullable<Objective['completion']>
+  /** Optional action limit for this stage, within the overall task budget. */
+  maxSteps?: number
 }
 
 /** Options for one {@link DecisionRuntime.run} call. */
@@ -119,6 +135,8 @@ export interface RunOptions {
   environment: string | EnvironmentAdapter
   /** What the caller wants achieved. */
   objective: Objective
+  /** Ordered stages supplied once by the planner; advanced from observed state. */
+  plan?: TaskPlanStep[]
   /** How far to promote execution. Defaults to `decision-only`. */
   mode?: ExecutionMode
   /** Override the runtime's static candidate set. */
@@ -137,6 +155,20 @@ export interface RunOptions {
   debug?: boolean
 }
 
+/** A whole task, executed without returning to the caller between steps. */
+export type TaskOptions = Omit<RunOptions, 'mode' | 'candidates'>
+export interface TaskOutcome extends RuntimeOutcome {
+  taskId: string
+  durationMs: number
+}
+
+/** Task defaults permit repeated legal moves; finite step/time budgets remain. */
+export const DEFAULT_TASK_CONFIG: RuntimeConfigInput = {
+  maxSteps: 1000,
+  maxDurationMs: 600_000,
+  repeatedDecisionLimit: 0,
+}
+
 /**
  * The runtime. One instance is shareable; per-run state lives in `run()`.
  */
@@ -145,6 +177,7 @@ export class DecisionRuntime {
   #baseConfig: RuntimeConfig
   readonly #now: () => number
   readonly #environments: EnvironmentRegistry | undefined
+  readonly #busy = new Set<string>()
 
   constructor(
     engine: DecisionEngine,
@@ -188,312 +221,227 @@ export class DecisionRuntime {
    *          Infrastructure failures (unknown environment, invalid request) throw a
    *          {@link DecisionError}; runtime *decisions to stop* return `needs_escalation`.
    */
+  async runTask(options: TaskOptions): Promise<TaskOutcome> {
+    const adapter = this.#resolveAdapter(options.environment)
+    if ((adapter.source === 'browser' || adapter.source === 'computer') && adapter.isDone === undefined && options.objective.completion === undefined && !options.plan?.length) {
+      throw new DecisionError('invalid_request', 'A whole browser/desktop task needs a completion rule or an adapter with isDone().')
+    }
+    const taskId = randomUUID()
+    const started = this.#now()
+    const outcome = await this.run({
+      ...options,
+      mode: 'bounded-loop',
+      config: { ...DEFAULT_TASK_CONFIG, ...options.config },
+    })
+    return { ...outcome, taskId, durationMs: this.#now() - started }
+  }
+
   async run(options: RunOptions): Promise<RuntimeOutcome> {
     const config = this.resolveConfig(options.config)
+    validateRuntimeConfig(config)
+    validateCompletion(options.objective.completion)
+    validatePlan(options.plan)
     const adapter = this.#resolveAdapter(options.environment)
-    const mode = options.mode ?? 'decision-only'
-    const startedAt = this.#now()
-    const objective = options.objective
+    if (this.#busy.has(adapter.id)) {
+      throw new DecisionError('environment_unavailable', `Environment "${adapter.id}" already has an active or draining run.`)
+    }
+    this.#busy.add(adapter.id)
+    const pending = new Set<Promise<unknown>>()
+    try {
+      return await this.#drive(options, config, adapter, pending)
+    } finally {
+      // A timed-out executor might still be applying an action. Keep the lease
+      // until outstanding work settles instead of allowing overlapping control.
+      if (pending.size === 0) this.#busy.delete(adapter.id)
+      else void Promise.allSettled([...pending]).then(() => this.#busy.delete(adapter.id))
+    }
+  }
 
-    const history: StepRecord[] = []
-    let stateFingerprint: string | undefined
+  async #drive(options: RunOptions, config: RuntimeConfig, adapter: EnvironmentAdapter, pending: Set<Promise<unknown>>): Promise<RuntimeOutcome> {
+    const startedAt = this.#now()
+    const mode = options.mode ?? 'decision-only'
+    if (!['decision-only', 'single-step', 'bounded-loop'].includes(mode)) throw new DecisionError('invalid_request', 'Unknown execution mode.')
+    const objective = options.objective
+    const plan = options.plan
+    let planIndex = 0
+    let planStartedAtStep = 0
+    let steps = 0
+    let lastObservation: Observation | undefined
+    let lastDecision: DecisionResult | undefined
+    let lastAction: EnvironmentAction | undefined
+    let lastExecution: ActionResult | undefined
     let unchangedStreak = 0
     let repeatedStreak = 0
     let lastSelected: string | undefined
-    let lastDecision: DecisionResult | undefined
-    let lastProviderId: string | undefined
-    // The decide call happens before mapping and execution, so each step's
-    // record carries the *previous* step's map/execute cost. That is what makes
-    // "which layer is slow" answerable from the records alone.
     let previousMapMs: number | undefined
     let previousExecuteMs: number | undefined
 
-    const escalate = (reason: DecisionErrorCode, details?: Record<string, unknown>, guidance?: string): RuntimeOutcome => {
-      const failure = { code: reason, message: typeof details?.message === 'string' ? details.message : reason }
-      const escalation = toEscalation(failure, {
-        environment: adapter.id,
-        ...lastProviderId === undefined ? {} : { provider: lastProviderId },
-        ...lastDecision === undefined
-          ? {}
-          : {
-              lastDecision: {
-                ...lastDecision.selected === undefined ? {} : { selected: lastDecision.selected },
-                ...lastDecision.confidence === undefined ? {} : { confidence: lastDecision.confidence },
-                ...lastDecision.confidenceKind === undefined ? {} : { confidenceKind: lastDecision.confidenceKind },
-                step: history.length,
-              },
-            },
-        ...guidance === undefined ? {} : { guidance },
-        ...details === undefined ? {} : { details: { ...details, steps: history.length } },
-      })
-      return { status: 'needs_escalation', environment: adapter.id, steps: history.length, escalation }
+    const check = (): number => {
+      if (options.signal?.aborted) throw new DecisionError('aborted', 'The run was aborted by the caller.')
+      const remaining = config.maxDurationMs - (this.#now() - startedAt)
+      if (remaining <= 0) throw new DecisionError('budget_exhausted', 'The task duration budget was exhausted.')
+      return remaining
     }
-
-    const maxSteps = mode === 'decision-only' ? 1 : mode === 'single-step' ? Math.min(1, config.maxSteps) : config.maxSteps
-
-    for (let step = 0; step < maxSteps; step += 1) {
-      if (options.signal?.aborted === true) return escalate('aborted', { message: 'The run was aborted by the caller.' })
-      if (this.#now() - startedAt > config.maxDurationMs) {
-        return escalate('budget_exhausted', { maxDurationMs: config.maxDurationMs })
+    const phase = async <T>(name: string, limit: number, work: (signal: AbortSignal, timeoutMs: number) => Promise<T> | T): Promise<T> => {
+      const ms = Math.min(limit, check())
+      const controller = new AbortController()
+      let rejectStop: (reason: unknown) => void = () => undefined
+      const stopped = new Promise<never>((_resolve, reject) => { rejectStop = reject })
+      const stop = (error: DecisionError): void => {
+        rejectStop(error)
+        controller.abort(error)
       }
+      const phaseDetails = { phase: name, ...name === 'execute' ? { actionMayHaveExecuted: true } : {} }
+      const onAbort = (): void => stop(new DecisionError('aborted', `Cancelled during ${name}.`, { details: phaseDetails }))
+      options.signal?.addEventListener('abort', onAbort, { once: true })
+      const timer = setTimeout(() => stop(new DecisionError('budget_exhausted', `${name} exceeded its ${ms}ms budget.`, { details: phaseDetails })), ms)
+      const active = Promise.resolve().then(() => {
+        if (controller.signal.aborted) throw controller.signal.reason
+        return work(controller.signal, ms)
+      })
+      pending.add(active)
+      void active.then(() => pending.delete(active), () => pending.delete(active))
+      try {
+        const value = await Promise.race([active, stopped])
+        check()
+        return value
+      } catch (error) {
+        if (error instanceof DecisionError) throw error
+        const fallback = name === 'execute' ? 'action_execution_failed' : name === 'map action' ? 'action_mapping_failed' : 'internal'
+        const failure = toDecisionFailure(error, fallback)
+        throw new DecisionError(failure.code, failure.message, { cause: error, details: phaseDetails })
+      } finally {
+        clearTimeout(timer)
+        options.signal?.removeEventListener('abort', onAbort)
+      }
+    }
+    const observe = (): Promise<Observation> => phase('observe', config.observeTimeoutMs,
+      (signal, timeoutMs) => adapter.observe({ signal, timeoutMs, objective }))
+    const assertObservation = (observation: Observation): void => {
+      if (observation.status === 'ok') return
+      throw new DecisionError(observation.status === 'insufficient' ? 'insufficient_observation'
+        : observation.status === 'unsupported' ? 'environment_unsupported' : 'environment_unavailable',
+      observation.reason ?? `Environment "${adapter.id}" returned ${observation.status}.`)
+    }
+    const isDone = (observation: Observation): Promise<boolean> => phase('completion check', config.observeTimeoutMs, async () =>
+      observation.done === true || completionMatches(observation.state, objective.completion)
+      || (await adapter.isDone?.(observation, objective)) === true)
+    const checkCompletion = async (observation: Observation): Promise<boolean> => {
+      // Stage transitions use the planner's explicit predicates. The small
+      // model chooses actions; it cannot silently rewrite or skip the plan.
+      if (plan !== undefined) {
+        while (planIndex < plan.length && completionMatches(observation.state, plan[planIndex]!.completion)) {
+          planIndex++
+          planStartedAtStep = steps
+        }
+        if (planIndex === plan.length) return true
+      }
+      return isDone(observation)
+    }
+    const outcome = (status: RuntimeOutcome['status'], stopReason: string): RuntimeOutcome => ({
+      status, environment: adapter.id, steps, stopReason,
+      ...steps === 0 ? {} : { stepIndex: steps - 1 },
+      ...lastDecision === undefined ? {} : { decision: lastDecision },
+      ...lastAction === undefined ? {} : { action: lastAction },
+      ...lastExecution === undefined ? {} : { execution: lastExecution },
+      ...lastObservation?.state === undefined ? {} : { finalState: lastObservation.state },
+      ...(lastObservation?.result ?? lastExecution?.result) === undefined ? {}
+        : { result: (lastObservation?.result ?? lastExecution?.result)! },
+      ...plan === undefined ? {} : {
+        completedPlanSteps: plan.slice(0, planIndex).map(stage => stage.id),
+        ...plan[planIndex] === undefined ? {} : { activePlanStep: plan[planIndex]!.id },
+      },
+    })
 
-      // ---- observe ----
+    try {
       const observeStarted = this.#now()
-      let observation: Observation
-      try {
-        observation = await adapter.observe({
-          ...options.signal === undefined ? {} : { signal: options.signal },
-          timeoutMs: config.observeTimeoutMs,
-          objective,
-        })
-      } catch (error) {
-        const failure = toDecisionFailure(error, 'internal')
-        return escalate(failure.code === 'internal' ? 'internal' : failure.code, { message: failure.message })
-      }
-      const observeMs = this.#now() - observeStarted
-      if (observation.status !== 'ok') {
-        const reason: DecisionErrorCode = observation.status === 'insufficient'
-          ? 'insufficient_observation'
-          : observation.status === 'unsupported'
-            ? 'environment_unsupported'
-            : 'environment_unavailable'
-        return escalate(reason, {
-          message: observation.reason ?? `Environment "${adapter.id}" reported ${observation.status}.`,
-          observationStatus: observation.status,
-          ...observation.metadata === undefined ? {} : { observation: observation.metadata },
-        }, observation.status === 'insufficient'
-          ? 'The environment cannot express this task with structured state; use the main agent instead of guessing.'
-          : undefined)
-      }
-
-      // ---- build request ----
-      let request
-      try {
-        request = await adapter.buildDecisionRequest(observation, objective)
-      } catch (error) {
-        const failure = toDecisionFailure(error, 'internal')
-        return escalate(failure.code, { message: failure.message })
-      }
-      if (options.candidates !== undefined) request = { ...request, candidates: options.candidates }
-      if (options.provider !== undefined) request = { ...request, provider: options.provider }
-      if (options.decisionMode !== undefined) request = { ...request, mode: options.decisionMode }
-      request = {
-        ...request,
-        metadata: { ...request.metadata, environment: adapter.id, step },
-      }
-
-      // ---- decide ----
-      let decision: DecisionResult
-      try {
-        decision = await this.#engine.decide(request, {
-          ...options.provider === undefined ? {} : { provider: options.provider },
-          ...options.signal === undefined ? {} : { signal: options.signal },
-          debug: options.debug === true,
-          environment: adapter.id,
-          step,
-          // Layers the runtime already measured, so the emitted record carries
-          // the environment's cost and the model's cost separately.
+      lastObservation = await observe()
+      let observeMs = this.#now() - observeStarted
+      assertObservation(lastObservation)
+      const maxSteps = mode === 'bounded-loop' ? config.maxSteps : 1
+      for (let step = 0; step < maxSteps; step += 1) {
+        check()
+        // Terminal states often offer no actions. Never require a model to
+        // answer another question before recognizing an already-finished task.
+        if (await checkCompletion(lastObservation)) return outcome('done', 'The environment is terminal or the configured completion conditions are met.')
+        const stage = plan?.[planIndex]
+        if (stage?.maxSteps !== undefined && steps - planStartedAtStep >= stage.maxSteps) {
+          throw new DecisionError('budget_exhausted', `Plan step "${stage.id}" reached its ${stage.maxSteps}-action budget.`)
+        }
+        const stepObjective = stage === undefined ? objective : {
+          ...objective,
+          description: `Current plan step (${stage.id}): ${stage.objective}\nOverall task: ${objective.description}`,
+        }
+        let request = await phase('build request', config.observeTimeoutMs, () => adapter.buildDecisionRequest(lastObservation!, stepObjective))
+        if (options.candidates !== undefined) request = { ...request, candidates: options.candidates }
+        if (options.provider !== undefined) request = { ...request, provider: options.provider }
+        if (options.decisionMode !== undefined) request = { ...request, mode: options.decisionMode }
+        request = { ...request, metadata: { ...request.metadata, environment: adapter.id, step } }
+        lastDecision = await phase('decide', check(), (signal, timeoutMs) => this.#engine.decide(request, {
+          signal, timeoutMs: Math.min(timeoutMs, this.#engine.timeoutMs), debug: options.debug === true, environment: adapter.id, step,
+          confidenceThreshold: config.confidenceThreshold,
           sourceTimings: {
             observeMs,
             ...previousMapMs === undefined ? {} : { mapMs: previousMapMs },
             ...previousExecuteMs === undefined ? {} : { executeMs: previousExecuteMs },
           },
-          confidenceThreshold: config.confidenceThreshold,
-        })
-      } catch (error) {
-        const failure = toDecisionFailure(error)
-        const reason = failure.code === 'unknown_candidate' ? 'unknown_candidate' : failure.code
-        return escalate(reason, {
-          message: failure.message,
-          ...failure.details === undefined ? {} : { decision: failure.details },
-          candidateCount: request.candidates.length,
-        })
-      }
-      lastDecision = decision
-      lastProviderId = decision.provider
-
-      // ---- done check (before acting, so a satisfied objective costs nothing) ----
-      if (typeof adapter.isDone === 'function') {
-        let done: boolean
-        try {
-          done = await adapter.isDone(observation, objective)
-        } catch {
-          done = false
+        }))
+        const mapStarted = this.#now()
+        lastAction = await phase('map action', config.executeTimeoutMs, () => adapter.mapDecision(lastDecision!, lastObservation!))
+        previousMapMs = this.#now() - mapStarted
+        if (mode === 'decision-only') return { ...outcome('decided', 'Decision-only mode: nothing was executed.'), steps: 1, stepIndex: 0 }
+        if (lastAction.risky && options.allowRisky !== true) throw new DecisionError('high_risk_action', `Action "${lastAction.candidateId}" requires confirmation.`)
+        const before = fingerprintState(lastObservation.state, config.stateFingerprintChars)
+        const executeStarted = this.#now()
+        check()
+        lastExecution = await phase('execute', config.executeTimeoutMs, (signal, timeoutMs) => adapter.execute(lastAction!, {
+          signal, timeoutMs, allowRisky: options.allowRisky === true,
+        }))
+        steps += 1
+        previousExecuteMs = this.#now() - executeStarted
+        if (!lastExecution.ok) throw new DecisionError('action_execution_failed', lastExecution.message ?? 'The environment refused the action.')
+        if (lastExecution.observation !== undefined) lastObservation = lastExecution.observation
+        else if (lastExecution.done === true) lastObservation = {
+          status: 'ok', source: adapter.source, done: true,
+          ...lastExecution.state === undefined ? {} : { state: lastExecution.state },
+          ...lastExecution.result === undefined ? {} : { result: lastExecution.result },
         }
-        if (done) {
-          return {
-            status: 'done',
-            environment: adapter.id,
-            steps: step + 1,
-            stepIndex: step,
-            decision,
-            stopReason: 'The environment reports the objective is already met.',
-          }
+        if (mode === 'single-step') return outcome('executed', 'Single-step mode: exactly one action was executed.')
+        if (lastExecution.done === true) {
+          assertObservation(lastObservation)
+          await checkCompletion(lastObservation)
+          return outcome('done', 'The environment reports a terminal result.')
         }
+        if (config.stepDelayMs > 0) await phase('settle', check(), signal => abortableSleep(config.stepDelayMs, signal))
+        const verifyStarted = this.#now()
+        if (lastExecution.observation === undefined) lastObservation = await observe()
+        observeMs = this.#now() - verifyStarted
+        assertObservation(lastObservation)
+        if (await checkCompletion(lastObservation)) return outcome('done', 'The environment is terminal or the configured completion conditions are met.')
+        const after = fingerprintState(lastObservation.state, config.stateFingerprintChars)
+        unchangedStreak = after !== undefined && after === before ? unchangedStreak + 1 : 0
+        if (config.noProgressLimit > 0 && unchangedStreak >= config.noProgressLimit) throw new DecisionError('no_progress', `The state did not change for ${unchangedStreak} actions.`)
+        repeatedStreak = lastDecision.selected === lastSelected ? repeatedStreak + 1 : 0
+        lastSelected = lastDecision.selected
+        if (config.repeatedDecisionLimit > 0 && repeatedStreak >= config.repeatedDecisionLimit) throw new DecisionError('repeated_decision', `The same candidate was chosen ${repeatedStreak + 1} times.`)
       }
-
-      // ---- map ----
-      const mapStarted = this.#now()
-      let action: EnvironmentAction
-      try {
-        action = await adapter.mapDecision(decision, observation)
-      } catch (error) {
-        const failure = toDecisionFailure(error, 'action_mapping_failed')
-        return escalate(failure.code, { message: failure.message, selected: decision.selected })
-      }
-      const mapMs = this.#now() - mapStarted
-
-      const timings: DecisionTimings = {
-        observeMs,
-        decisionMs: decision.latencyMs,
-        mapMs,
-        totalMs: this.#now() - startedAt,
-      }
-
-      if (mode === 'decision-only') {
-        return {
-          status: 'decided',
+      throw new DecisionError('budget_exhausted', `The run reached its ${maxSteps}-step budget without completing.`)
+    } catch (error) {
+      const failure = toDecisionFailure(error, 'internal')
+      return {
+        ...outcome('needs_escalation', failure.message),
+        escalation: toEscalation(failure, {
           environment: adapter.id,
-          steps: 1,
-          stepIndex: 0,
-          decision,
-          action,
-          stopReason: 'Decision-only mode: nothing was executed.',
-        }
+          ...lastDecision === undefined ? {} : { provider: lastDecision.provider, lastDecision: {
+            ...lastDecision.selected === undefined ? {} : { selected: lastDecision.selected },
+            ...lastDecision.confidence === undefined ? {} : { confidence: lastDecision.confidence },
+            ...lastDecision.confidenceKind === undefined ? {} : { confidenceKind: lastDecision.confidenceKind },
+            step: steps,
+          } },
+          details: { ...failure.details, message: failure.message, steps },
+        }),
       }
-
-      if (action.risky === true && options.allowRisky !== true) {
-        return escalate('high_risk_action', {
-          message: `Action "${action.candidateId}" is marked risky; refusing to execute it without confirmation.`,
-          action: { kind: action.kind, candidateId: action.candidateId, description: action.description },
-        })
-      }
-
-      // ---- execute ----
-      const executeStarted = this.#now()
-      let execution: ActionResult
-      try {
-        const executeInput: ExecuteInput = {
-          ...options.signal === undefined ? {} : { signal: options.signal },
-          timeoutMs: config.executeTimeoutMs,
-          allowRisky: options.allowRisky === true,
-        }
-        execution = await adapter.execute(action, executeInput)
-      } catch (error) {
-        const failure = toDecisionFailure(error, 'action_execution_failed')
-        return escalate(failure.code, { message: failure.message, action: { kind: action.kind, candidateId: action.candidateId } })
-      }
-      const executeMs = this.#now() - executeStarted
-      timings.executeMs = executeMs
-      timings.totalMs = this.#now() - startedAt
-      previousMapMs = mapMs
-      previousExecuteMs = executeMs
-
-      const record: StepRecord = {
-        index: step,
-        decision,
-        action,
-        execution,
-        executed: true,
-        timings,
-      }
-      history.push(record)
-
-      if (execution.ok !== true) {
-        return escalate('action_execution_failed', {
-          message: execution.message ?? `Action "${action.candidateId}" reported failure.`,
-          action: { kind: action.kind, candidateId: action.candidateId },
-        })
-      }
-      if (mode === 'single-step') {
-        return {
-          status: 'executed',
-          environment: adapter.id,
-          steps: 1,
-          stepIndex: 0,
-          decision,
-          action,
-          execution,
-          stopReason: 'Single-step mode: exactly one action was executed.',
-        }
-      }
-
-      // ---- verify (progress detection) ----
-      const nextObservation = await this.#safeObserve(adapter, options.signal, config.observeTimeoutMs, objective)
-      if (nextObservation.status !== 'ok') {
-        return escalate('insufficient_observation', {
-          message: nextObservation.reason ?? 'The environment stopped producing usable structured state.',
-          afterStep: step,
-        })
-      }
-      if (typeof adapter.isDone === 'function') {
-        let done: boolean
-        try {
-          done = await adapter.isDone(nextObservation, objective)
-        } catch {
-          done = false
-        }
-        if (done || execution.done === true) {
-          return {
-            status: 'done',
-            environment: adapter.id,
-            steps: step + 1,
-            stepIndex: step,
-            decision,
-            action,
-            execution,
-            stopReason: 'The environment reports the objective is met.',
-          }
-        }
-      } else if (execution.done === true) {
-        return {
-          status: 'done',
-          environment: adapter.id,
-          steps: step + 1,
-          stepIndex: step,
-          decision,
-          action,
-          execution,
-          stopReason: 'The environment reports the objective is met.',
-        }
-      }
-
-      const fingerprint = fingerprintState(nextObservation.state, config.stateFingerprintChars)
-      if (fingerprint !== undefined && fingerprint === stateFingerprint) {
-        unchangedStreak += 1
-        if (unchangedStreak >= config.noProgressLimit) {
-          return escalate('no_progress', {
-            message: `The environment state did not change for ${unchangedStreak} consecutive steps.`,
-            noProgressLimit: config.noProgressLimit,
-          })
-        }
-      } else {
-        unchangedStreak = 0
-      }
-      if (fingerprint !== undefined) stateFingerprint = fingerprint
-
-      const selected = decision.selected
-      if (selected !== undefined && selected === lastSelected) {
-        repeatedStreak += 1
-        if (repeatedStreak >= config.repeatedDecisionLimit) {
-          return escalate('repeated_decision', {
-            message: `The same candidate "${selected}" was chosen ${repeatedStreak + 1} times in a row.`,
-            repeatedDecisionLimit: config.repeatedDecisionLimit,
-            selected,
-          })
-        }
-      } else {
-        repeatedStreak = 0
-      }
-      lastSelected = selected
-
-      if (config.stepDelayMs > 0) await abortableSleep(config.stepDelayMs, options.signal)
     }
-
-    return escalate('budget_exhausted', {
-      message: `The run reached its ${maxSteps}-step budget without meeting the objective.`,
-      maxSteps,
-    })
   }
 
   #resolveAdapter(environment: string | EnvironmentAdapter): EnvironmentAdapter {
@@ -505,20 +453,6 @@ export class DecisionRuntime {
     }
     return this.#environments.require(environment)
   }
-
-  async #safeObserve(adapter: EnvironmentAdapter, signal: AbortSignal | undefined, timeoutMs: number, objective: Objective): Promise<Observation> {
-    try {
-      return await adapter.observe({
-        ...signal === undefined ? {} : { signal },
-        timeoutMs,
-        objective,
-      })
-    } catch (error) {
-      const failure = toDecisionFailure(error, 'internal')
-      return { status: 'error', source: adapter.source, reason: failure.message }
-    }
-  }
-
 }
 
 /**
@@ -557,4 +491,50 @@ export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> 
     }
     signal?.addEventListener('abort', onAbort, { once: true })
   })
+}
+
+/** Validate budgets at the public boundary, including non-DSH callers. */
+export function validateRuntimeConfig(config: RuntimeConfig): void {
+  for (const key of ['maxSteps', 'maxDurationMs', 'observeTimeoutMs', 'executeTimeoutMs', 'stateFingerprintChars'] as const) {
+    if (!Number.isFinite(config[key]) || config[key] <= 0) throw new DecisionError('invalid_request', `${key} must be finite and positive.`)
+  }
+  for (const key of ['noProgressLimit', 'repeatedDecisionLimit', 'stepDelayMs'] as const) {
+    if (!Number.isFinite(config[key]) || config[key] < 0) throw new DecisionError('invalid_request', `${key} must be finite and non-negative.`)
+  }
+  if (!Number.isInteger(config.maxSteps)) throw new DecisionError('invalid_request', 'maxSteps must be an integer.')
+  if (!Number.isFinite(config.confidenceThreshold) || config.confidenceThreshold < 0 || config.confidenceThreshold > 1) throw new DecisionError('invalid_request', 'confidenceThreshold must be between 0 and 1.')
+}
+
+export function validateCompletion(rule: Objective['completion']): void {
+  if (rule === undefined) return
+  if (rule === null || typeof rule !== 'object' || typeof rule.path !== 'string' || rule.path.trim() === '' || (rule.equals === undefined) === (rule.includes === undefined)
+    || (rule.includes !== undefined && (typeof rule.includes !== 'string' || rule.includes === ''))
+    || (rule.equals !== undefined && !['string', 'number', 'boolean'].includes(typeof rule.equals))) {
+    throw new DecisionError('invalid_request', 'completion needs a path and exactly one of equals/includes.')
+  }
+}
+
+function validatePlan(plan: TaskPlanStep[] | undefined): void {
+  if (plan === undefined) return
+  if (!Array.isArray(plan) || plan.length === 0 || plan.length > 64) throw new DecisionError('invalid_request', 'A plan must contain between 1 and 64 stages.')
+  const ids = new Set<string>()
+  for (const stage of plan) {
+    if (stage === null || typeof stage !== 'object' || typeof stage.id !== 'string' || stage.id.trim() === '' || ids.has(stage.id)
+      || typeof stage.objective !== 'string' || stage.objective.trim() === '' || stage.completion === undefined
+      || (stage.maxSteps !== undefined && (!Number.isInteger(stage.maxSteps) || stage.maxSteps <= 0))) {
+      throw new DecisionError('invalid_request', 'Each plan stage needs a unique id, an objective, a completion rule, and an optional positive integer maxSteps.')
+    }
+    ids.add(stage.id)
+    validateCompletion(stage.completion)
+  }
+}
+
+function completionMatches(state: unknown, rule: Objective['completion']): boolean {
+  if (rule === undefined) return false
+  let value = state
+  for (const key of rule.path.split('.')) {
+    if (typeof value !== 'object' || value === null || !Object.hasOwn(value, key)) return false
+    value = (value as Record<string, unknown>)[key]
+  }
+  return rule.includes === undefined ? value === rule.equals : typeof value === 'string' && value.includes(rule.includes)
 }

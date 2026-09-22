@@ -237,9 +237,8 @@ export function looksCanvasLike(snapshot: Pick<BrowserSnapshot, 'main' | 'mainCh
   // A page that names a canvas/WebGL/three.js surface and exposes nothing to
   // address is the case this status exists for.
   if (/<canvas|webgl|three\.js|video (element|player)/i.test(probe)) return true
-  // Otherwise: essentially no readable text at all. Prose that merely mentions
-  // "canvas" is an ordinary page and must not be reported as unsupported.
-  return snapshot.mainChars < 40
+  // Even short text ("Score: 100") can be a valid terminal result page.
+  return snapshot.mainChars === 0
 }
 
 function parseItem(line: string): SnapshotItem | undefined {

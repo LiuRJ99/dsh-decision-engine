@@ -178,7 +178,7 @@ describe('environment boundary', () => {
   it('never reads a screenshot: no environment file mentions screenshot analysis', () => {
     for (const file of sourceFiles('src/environments')) {
       const code = readFileSync(file, 'utf8').split('\n').filter(line => !/^\s*(\*|\/\*|\/\/)/.test(line)).join('\n')
-      assert.ok(!/screenshot\s*\.\s*(data|width|height)|ocr|tesseract|vision/i.test(code), `${file.replace(ROOT, '')} touches pixels`)
+      assert.ok(!/screenshot\s*\.\s*(data|width|height)|\b(?:ocr|tesseract|vision)\b/i.test(code), `${file.replace(ROOT, '')} touches pixels`)
     }
   })
 })
@@ -239,12 +239,13 @@ describe('host dependency boundary', () => {
 })
 
 describe('public surface', () => {
-  it('exposes exactly one decision tool', () => {
+  it('exposes separate single-decision and whole-task tools', () => {
     const index = readFileSync(join(ROOT, 'src/index.ts'), 'utf8')
     const names = [...index.matchAll(/name:\s*'(decision_[a-z_]+)'/g)].map(match => match[1])
     const fromTool = [...readFileSync(join(ROOT, 'src/tools/decision-decide.ts'), 'utf8').matchAll(/name:\s*'(decision_[a-z_]+)'/g)].map(match => match[1])
-    const all = new Set([...names, ...fromTool])
-    assert.deepEqual([...all], ['decision_decide'])
+    const fromTask = [...readFileSync(join(ROOT, 'src/tools/decision-run.ts'), 'utf8').matchAll(/name:\s*'(decision_[a-z_]+)'/g)].map(match => match[1])
+    const all = new Set([...names, ...fromTool, ...fromTask])
+    assert.deepEqual([...all], ['decision_decide', 'decision_run'])
   })
 
   it('uses model-neutral names: no laya_* tool and no /laya skill', () => {

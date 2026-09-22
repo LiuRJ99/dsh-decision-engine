@@ -141,7 +141,7 @@ function buildDialog(options: { transport: 'seam' | 'tools' }) {
     },
     computer_use_click: (args) => {
       toolCalls.push({ name: 'computer_use_click', args })
-      if (Number(args.elementIndex) === 5) dialog.close()
+      if (Number(args.element_index) === 5) dialog.close()
       return { ok: true, text: 'clicked' }
     },
   })
@@ -213,7 +213,7 @@ describe('computer flow over the ctx.computer seam', () => {
     const outcome = await runtime.run({ environment: 'computer', objective: { description: 'Do something.' }, mode: 'bounded-loop' })
     assert.equal(outcome.status, 'needs_escalation')
     assert.equal(outcome.escalation?.reason, 'insufficient_observation')
-    assert.match(outcome.escalation?.guidance ?? '', /instead of guessing/i)
+    assert.match(outcome.escalation?.guidance ?? '', /do not guess/i)
   })
 
   it('escalates when Accessibility permission is missing', async () => {
@@ -245,7 +245,7 @@ describe('computer flow over the registered tool family', () => {
     })
     assert.equal(outcome.status, 'executed')
     assert.deepEqual(toolCalls.map(call => call.name), ['computer_use_get_app_state', 'computer_use_click'])
-    assert.equal(toolCalls[1]?.args.elementIndex, 3)
+    assert.equal(toolCalls[1]?.args.element_index, 3)
   })
 
   it('maps a tool refusal to an escalation instead of retrying blindly', async () => {

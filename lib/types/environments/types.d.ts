@@ -46,6 +46,10 @@ export interface Observation {
     source: EnvironmentSource;
     /** Environment-owned structured state. Absent only when status is not `ok`. */
     state?: unknown;
+    /** Environment-owned terminal marker, checked before asking a model. */
+    done?: boolean;
+    /** Final score/outcome, supplied by the environment rather than invented by a model. */
+    result?: Record<string, unknown>;
     /** Machine-readable hint for why the observation is not `ok`. */
     reason?: string;
     /** Human/model-readable explanation of the state, when it helps. */
@@ -61,6 +65,15 @@ export interface Objective {
     successCriteria?: string[];
     /** Hard constraints the environment must respect. */
     constraints?: string[];
+    /** Optional machine-checkable completion rule over observation.state. */
+    completion?: CompletionRule;
+}
+export interface CompletionRule {
+    /** Dot-separated own-property path, for example "main" or "progress.finished". */
+    path: string;
+    /** Exactly one of equals/includes must be supplied. */
+    equals?: string | number | boolean;
+    includes?: string;
 }
 /** Build an `ok` observation. */
 export declare function okObservation(source: EnvironmentSource, state: unknown, extra?: Omit<Observation, 'status' | 'source' | 'state'>): Observation;
@@ -103,6 +116,9 @@ export interface ActionResult {
     state?: unknown;
     /** Whether the environment now believes the objective is met, when it can tell. */
     done?: boolean;
+    /** A complete post-action observation; avoids a redundant round trip. */
+    observation?: Observation;
+    result?: Record<string, unknown>;
 }
 /** What a decision produced, plus the action it maps to. */
 export interface DecisionEnvelope {

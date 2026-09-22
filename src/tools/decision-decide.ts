@@ -23,6 +23,7 @@
 
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { DecisionError } from '../core/errors.ts'
+import type { ToolExecutionScope } from './execution-scope.ts'
 import type { DecideToolContext, DecideToolInput, DecideToolOutput } from './decide-logic.ts'
 import {
   PARAMETERS,
@@ -48,7 +49,7 @@ export {
 } from './decide-logic.ts'
 
 /** Build the tool definition. */
-export function defineDecideTool(context: DecideToolContext): ToolDefinition {
+export function defineDecideTool(context: DecideToolContext, scope?: ToolExecutionScope): ToolDefinition {
   const { service } = context
   return defineTool({
     name: 'decision_decide',
@@ -104,12 +105,15 @@ export function defineDecideTool(context: DecideToolContext): ToolDefinition {
       },
     },
     execute: async (args, exec) => {
-      const input = args as DecideToolInput
-      const violation = preflightDecideInput(input, service)
-      if (violation !== undefined) {
-        throw new DecisionError('invalid_request', violation)
+      const work = async () => {
+        const input = args as DecideToolInput
+        const violation = preflightDecideInput(input, service)
+        if (violation !== undefined) {
+          throw new DecisionError('invalid_request', violation)
+        }
+        return executeDecide(input, { service, ...exec.agent === undefined ? {} : { agent: exec.agent } }, exec.signal)
       }
-      return executeDecide(input, { service, ...exec.agent === undefined ? {} : { agent: exec.agent } }, exec.signal)
+      return scope === undefined ? work() : scope(exec, work)
     },
   })
 }

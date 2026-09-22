@@ -9,10 +9,10 @@
  * ```ts
  * import { createDecisionLayer } from 'dsh-decision-engine/embed'
  *
- * const decisions = createDecisionLayer({ modelDir: '/path/to/laya/bundle' })
+ * const decisions = createDecisionLayer({ laya: { modelDir: '/path/to/laya/bundle' } })
  * decisions.environments.register(myGameAdapter)
  *
- * const outcome = await decisions.decide({ environment: 'my-game', objective: 'Win.' })
+ * const outcome = await decisions.runTask({ environment: 'my-game', objective: 'Win.' })
  * ```
  *
  * It is deliberately NOT a second implementation: it composes the same engine,
@@ -29,7 +29,7 @@ import type { DecisionProvider, DecisionRequest, DecisionResult } from './core/t
 import type { DecisionTelemetry, DecisionTelemetrySink } from './core/telemetry.ts';
 import { EnvironmentRegistry } from './environments/registry.ts';
 import type { EnvironmentAdapter, Objective } from './environments/types.ts';
-import { DecisionRuntime, type ExecutionMode, type RunOptions, type RuntimeConfig, type RuntimeConfigInput, type RuntimeOutcome } from './runtime/runner.ts';
+import { DecisionRuntime, type ExecutionMode, type RunOptions, type RuntimeConfig, type RuntimeConfigInput, type RuntimeOutcome, type TaskOptions, type TaskOutcome } from './runtime/runner.ts';
 import { CustomEnvironmentAdapter, type CustomEnvironmentSpec } from './environments/custom/adapter.ts';
 import type { LayaConfig } from './providers/laya/config.ts';
 import type { DecisionEngineHealth } from './service.ts';
@@ -72,6 +72,10 @@ export interface EmbeddedDecisionLayer {
      *   {@link EmbeddedDecisionLayer.decideEnvironment}.
      */
     decide(request: DecisionRequest): Promise<DecisionResult>;
+    /** Run an independent task; no per-step caller intervention. */
+    runTask(options: Omit<TaskOptions, 'objective'> & {
+        objective: Objective | string;
+    }): Promise<TaskOutcome>;
     /**
      * Observe an environment, decide, map to a concrete action, and optionally
      * execute — returning the escalation shape rather than throwing when the layer
@@ -105,4 +109,7 @@ export declare function createDecisionLayer(options?: EmbedOptions): EmbeddedDec
 export { CustomEnvironmentAdapter };
 export type { CustomEnvironmentSpec };
 export type { EnvironmentAdapter, Objective, RunOptions, RuntimeOutcome, ExecutionMode };
+export { HttpEnvironmentAdapter, ENVIRONMENT_PROTOCOL } from './environments/http/adapter.ts';
+export type { EnvironmentSnapshot, EnvironmentActionRequest, HttpEnvironmentOptions } from './environments/http/adapter.ts';
+export type { TaskOptions, TaskOutcome, TaskPlanStep } from './runtime/runner.ts';
 //# sourceMappingURL=embed.d.ts.map

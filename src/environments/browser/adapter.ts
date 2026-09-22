@@ -330,11 +330,8 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
         metadata: { url: snapshot.url, textChars, addressable },
       })
     }
-    if (addressable === 0) {
-      return failedObservation('browser', 'insufficient', 'The snapshot listed no interactive elements, so no finite candidate set can be derived from the page.', {
-        metadata: { url: snapshot.url, textChars, mainChars: snapshot.mainChars },
-      })
-    }
+    // Read-only result pages are valid observations. Completion is checked
+    // before candidate derivation; an unfinished page still fails no_candidates.
     if (snapshot.unparsed.length > snapshot.items.length + snapshot.forms.length) {
       return failedObservation('browser', 'insufficient', 'Most snapshot lines could not be parsed, so the page structure is not trustworthy.', {
         metadata: { url: snapshot.url, unparsed: snapshot.unparsed.slice(0, 5) },

@@ -9,6 +9,7 @@
  * @module dsh-decision-engine/plugin
  */
 import type { Context } from '@deepseek-ai/cordis';
+import type { ToolRunContext } from '@deepseek-ai/dsh-tools';
 import { type ToolCallRequest, type ToolCallResult, type ToolDispatcher } from './environments/dispatch.ts';
 import { type Config } from './composition.ts';
 /** Cordis plugin name used by loader diagnostics. */
@@ -28,7 +29,7 @@ export declare const inject: string[];
  */
 export declare class HostToolDispatcher implements ToolDispatcher {
     #private;
-    constructor(ctx: Context);
+    constructor(ctx: Context, execution?: () => ToolRunContext | undefined);
     availableTools(): readonly string[];
     call(request: ToolCallRequest): Promise<ToolCallResult>;
 }

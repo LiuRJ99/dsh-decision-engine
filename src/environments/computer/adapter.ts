@@ -331,7 +331,8 @@ export class ComputerEnvironmentAdapter implements EnvironmentAdapter {
   }
 
   /** Execute a mapped desktop action. */
-  async execute(action: EnvironmentAction, _input?: ExecuteInput): Promise<{ ok: boolean; message?: string }> {
+  async execute(action: EnvironmentAction, input?: ExecuteInput): Promise<{ ok: boolean; message?: string }> {
+    if (input?.signal?.aborted) throw new DecisionError('aborted', 'The desktop action was cancelled.')
     const app = this.#pendingApp ?? this.#config.app
     if (app === undefined) {
       throw new DecisionError('action_mapping_failed', 'No target app is known; observe before executing an action.', { subject: this.id })
@@ -340,28 +341,28 @@ export class ComputerEnvironmentAdapter implements EnvironmentAdapter {
     const payload = action.payload ?? {}
     switch (action.kind) {
       case 'click':
-        return this.#invoke('click', { app, ...elementIndex === undefined ? {} : { elementIndex } })
+        return this.#invoke('click', { app, ...elementIndex === undefined ? {} : { elementIndex } }, input)
       case 'set_value': {
         if (elementIndex === undefined) {
           throw new DecisionError('action_mapping_failed', 'set_value requires an element index.', { subject: this.id })
         }
-        return this.#invoke('setValue', { app, elementIndex, value: String(payload.value ?? '') })
+        return this.#invoke('setValue', { app, elementIndex, value: String(payload.value ?? '') }, input)
       }
       case 'press_key':
-        return this.#invoke('pressKey', { app, key: String(payload.key ?? 'Return') })
+        return this.#invoke('pressKey', { app, key: String(payload.key ?? 'Return') }, input)
       case 'scroll': {
         if (elementIndex === undefined) {
           throw new DecisionError('action_mapping_failed', 'scroll requires an element index.', { subject: this.id })
         }
-        return this.#invoke('scroll', { app, elementIndex, direction: String(payload.direction ?? 'down') })
+        return this.#invoke('scroll', { app, elementIndex, direction: String(payload.direction ?? 'down') }, input)
       }
       case 'type_text':
-        return this.#invoke('typeText', { app, text: String(payload.text ?? '') })
+        return this.#invoke('typeText', { app, text: String(payload.text ?? '') }, input)
       case 'select_text': {
         if (elementIndex === undefined) {
           throw new DecisionError('action_mapping_failed', 'select_text requires an element index.', { subject: this.id })
         }
-        return this.#invoke('selectText', { app, elementIndex, text: String(payload.find ?? '') })
+        return this.#invoke('selectText', { app, elementIndex, text: String(payload.find ?? '') }, input)
       }
       default:
         throw new DecisionError('action_mapping_failed', `Unsupported computer action kind "${action.kind}".`, { subject: this.id })
@@ -410,7 +411,7 @@ export class ComputerEnvironmentAdapter implements EnvironmentAdapter {
     }
     const result = await this.#dispatcher.call({
       name: COMPUTER_TOOLS.getAppState,
-      arguments: { app, maxTreeNodes: this.#config.maxTreeNodes },
+      arguments: { app, max_tree_nodes: this.#config.maxTreeNodes, disable_diff: true },
       ...signal === undefined ? {} : { signal },
     })
     if (!result.ok) return { ok: false, error: result.error ?? 'computer_use_get_app_state failed.' }
@@ -420,8 +421,10 @@ export class ComputerEnvironmentAdapter implements EnvironmentAdapter {
   async #invoke(
     operation: 'click' | 'setValue' | 'pressKey' | 'scroll' | 'typeText' | 'selectText',
     args: Record<string, unknown>,
+    input?: ExecuteInput,
   ): Promise<{ ok: boolean; message?: string }> {
     if (this.#seam !== undefined) {
+      args = { ...args, ...input?.signal === undefined ? {} : { signal: input.signal }, ...input?.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs } }
       const method = this.#seam[operation]
       if (typeof method !== 'function') {
         throw new DecisionError('environment_unavailable', `The mounted computer seam does not implement ${operation}().`, { subject: this.id })
@@ -446,7 +449,9 @@ export class ComputerEnvironmentAdapter implements EnvironmentAdapter {
             : operation === 'scroll'
               ? COMPUTER_TOOLS.scroll
               : COMPUTER_TOOLS.click
-    const result = await dispatcher.call({ name: toolName, arguments: args })
+    const toolArgs = { ...args }
+    if ('elementIndex' in toolArgs) { toolArgs.element_index = toolArgs.elementIndex; delete toolArgs.elementIndex }
+    const result = await dispatcher.call({ name: toolName, arguments: toolArgs, ...input?.signal === undefined ? {} : { signal: input.signal } })
     return result.ok
       ? { ok: true, ...firstLine(result.text) === undefined ? {} : { message: firstLine(result.text) as string } }
       : { ok: false, message: result.error ?? `${toolName} failed` }

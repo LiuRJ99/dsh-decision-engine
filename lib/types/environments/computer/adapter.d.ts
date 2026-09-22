@@ -156,7 +156,7 @@ export declare class ComputerEnvironmentAdapter implements EnvironmentAdapter {
     /** Map a chosen candidate id to a desktop action. */
     mapDecision(result: DecisionResult, observation: Observation): EnvironmentAction;
     /** Execute a mapped desktop action. */
-    execute(action: EnvironmentAction, _input?: ExecuteInput): Promise<{
+    execute(action: EnvironmentAction, input?: ExecuteInput): Promise<{
         ok: boolean;
         message?: string;
     }>;

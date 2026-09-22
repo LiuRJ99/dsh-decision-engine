@@ -48,7 +48,7 @@ export interface RuntimeConfig {
     confidenceThreshold: number;
     /** How many consecutive steps without a state change trigger `no_progress`. Defaults to 3. */
     noProgressLimit: number;
-    /** How many times the same action may be chosen in a row before `repeated_decision`. Defaults to 3. */
+    /** Repeat limit; 0 disables it. Task takeover defaults to 0, legacy loops to 3. */
     repeatedDecisionLimit: number;
     /** Per-observation budget in milliseconds. */
     observeTimeoutMs: number;
@@ -94,6 +94,20 @@ export interface RuntimeOutcome {
     escalation?: EscalationResult;
     /** Reason for a non-`needs_escalation` early stop (`done` via the adapter's own check). */
     stopReason?: string;
+    /** Last observed state and environment-reported score/outcome. */
+    finalState?: unknown;
+    result?: Record<string, unknown>;
+    /** Progress through the caller's plan; no intermediate main-agent turn. */
+    completedPlanSteps?: string[];
+    activePlanStep?: string;
+}
+/** A main-agent-planned stage. The executor chooses actions within this stage. */
+export interface TaskPlanStep {
+    id: string;
+    objective: string;
+    completion: NonNullable<Objective['completion']>;
+    /** Optional action limit for this stage, within the overall task budget. */
+    maxSteps?: number;
 }
 /** Options for one {@link DecisionRuntime.run} call. */
 export interface RunOptions {
@@ -101,6 +115,8 @@ export interface RunOptions {
     environment: string | EnvironmentAdapter;
     /** What the caller wants achieved. */
     objective: Objective;
+    /** Ordered stages supplied once by the planner; advanced from observed state. */
+    plan?: TaskPlanStep[];
     /** How far to promote execution. Defaults to `decision-only`. */
     mode?: ExecutionMode;
     /** Override the runtime's static candidate set. */
@@ -122,6 +138,14 @@ export interface RunOptions {
     /** Keep provider debug detail on every result. */
     debug?: boolean;
 }
+/** A whole task, executed without returning to the caller between steps. */
+export type TaskOptions = Omit<RunOptions, 'mode' | 'candidates'>;
+export interface TaskOutcome extends RuntimeOutcome {
+    taskId: string;
+    durationMs: number;
+}
+/** Task defaults permit repeated legal moves; finite step/time budgets remain. */
+export declare const DEFAULT_TASK_CONFIG: RuntimeConfigInput;
 /**
  * The runtime. One instance is shareable; per-run state lives in `run()`.
  */
@@ -152,6 +176,7 @@ export declare class DecisionRuntime {
      *          Infrastructure failures (unknown environment, invalid request) throw a
      *          {@link DecisionError}; runtime *decisions to stop* return `needs_escalation`.
      */
+    runTask(options: TaskOptions): Promise<TaskOutcome>;
     run(options: RunOptions): Promise<RuntimeOutcome>;
 }
 /**
@@ -163,4 +188,7 @@ export declare class DecisionRuntime {
 export declare function fingerprintState(state: unknown, limit: number): string | undefined;
 /** Sleep that settles early when the signal aborts. Never rejects. */
 export declare function abortableSleep(ms: number, signal?: AbortSignal): Promise<void>;
+/** Validate budgets at the public boundary, including non-DSH callers. */
+export declare function validateRuntimeConfig(config: RuntimeConfig): void;
+export declare function validateCompletion(rule: Objective['completion']): void;
 //# sourceMappingURL=runner.d.ts.map

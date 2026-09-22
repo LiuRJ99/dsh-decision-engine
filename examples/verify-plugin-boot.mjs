@@ -111,6 +111,7 @@ apply(ctx, {
 
 check('ctx.decisionEngine is published', ctx.decisionEngine !== undefined && typeof ctx.decisionEngine.decide === 'function')
 check('the decision tool is registered', ctx.tools.schemas().some(schema => schema.name === 'decision_decide'), ctx.tools.schemas().map(schema => schema.name).filter(n => n.startsWith('decision_')).join(', '))
+check('the task takeover tool and service are registered', ctx.tools.schemas().some(schema => schema.name === 'decision_run') && typeof ctx.decisionEngine.runTask === 'function')
 check('environment adapters are registered', ctx.decisionEngine.environments.ids().includes('browser') && ctx.decisionEngine.environments.ids().includes('computer'), ctx.decisionEngine.environments.ids().join(', '))
 check('the confidence floor and runtime budgets are resolved', ctx.decisionEngine.confidenceThreshold > 0 && ctx.decisionEngine.runtimeConfig.maxSteps > 0, `threshold=${ctx.decisionEngine.confidenceThreshold} maxSteps=${ctx.decisionEngine.runtimeConfig.maxSteps}`)
 check('the Laya provider is registered under providers.laya, not a top-level key', ctx.decisionEngine.providers.ids().includes('laya') && ctx.decisionEngine.providers.getDefaultId() === 'laya', ctx.decisionEngine.providers.ids().join(', '))

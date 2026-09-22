@@ -10,14 +10,17 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { toDecisionFailure } from './core/errors.ts'
 import { toolFailure, type ToolCallRequest, type ToolCallResult, type ToolDispatcher } from './environments/dispatch.ts'
 import { Config as ConfigSchema, createDecisionEngineComposition, type Config } from './composition.ts'
-import type { ComputerSeam } from './environments/computer/adapter.ts'
 import { defineDecideTool } from './tools/decision-decide.ts'
+import { defineRunTool } from './tools/decision-run.ts'
+import type { ToolExecutionScope } from './tools/execution-scope.ts'
 import { queryCapabilityUnlocked, TOOL_LAZY_GATE_SERVICE } from './gate.ts'
 import { DECISION_CONTROL_SKILL } from './skill.ts'
 
@@ -40,15 +43,17 @@ export const inject = ['tools', 'systemPrompt']
  */
 export class HostToolDispatcher implements ToolDispatcher {
   readonly #ctx: Context
+  readonly #execution: () => ToolRunContext | undefined
   #callCounter = 0
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, execution: () => ToolRunContext | undefined = () => undefined) {
     this.#ctx = ctx
+    this.#execution = execution
   }
 
   availableTools(): readonly string[] {
     try {
-      return this.#ctx.tools.schemas().map(schema => schema.name)
+      return this.#ctx.tools.schemas(this.#execution()?.agent).map(schema => schema.name)
     } catch {
       return []
     }
@@ -59,7 +64,8 @@ export class HostToolDispatcher implements ToolDispatcher {
     if (tools === undefined) {
       return toolFailure(request.name, 'the host tool registry is not mounted')
     }
-    const agent = requestAgent(this.#ctx)
+    const execution = this.#execution()
+    const agent = execution?.agent ?? requestAgent(this.#ctx)
     this.#callCounter += 1
     const callId = `decision-engine:${this.#callCounter}`
     try {
@@ -68,6 +74,7 @@ export class HostToolDispatcher implements ToolDispatcher {
         name: request.name,
         arguments: request.arguments,
         ...agent === undefined ? {} : { agent },
+        ...execution === undefined ? {} : { parent: execution.token, rootCallId: execution.rootCallId },
         signal: request.signal ?? new AbortController().signal,
       })
       const text = result.content
@@ -126,16 +133,16 @@ interface SettingsSurface {
 export function apply(ctx: Context, config: Config = {}): void {
   if (config.enabled === false) return
 
-  const dispatcher = new HostToolDispatcher(ctx)
+  const execution = new AsyncLocalStorage<ToolRunContext>()
+  const scope: ToolExecutionScope = (caller, work) => execution.run(caller, work)
+  const dispatcher = new HostToolDispatcher(ctx, () => execution.getStore())
   const gate = (): unknown => ctx.get(TOOL_LAZY_GATE_SERVICE as never)
-  const computerSeam = ctx.get('computer' as never) as ComputerSeam | undefined
 
   const composition = createDecisionEngineComposition({
     config,
     dispatcher,
-    ...computerSeam === undefined ? {} : { computerSeam },
     readCapabilityGate: (capability: 'browser' | 'computer') => {
-      const agent = requestAgent(ctx)
+      const agent = execution.getStore()?.agent ?? requestAgent(ctx)
       return queryCapabilityUnlocked(gate(), agent, capability)
     },
   })
@@ -148,9 +155,10 @@ export function apply(ctx: Context, config: Config = {}): void {
     void composition.dispose()
   }, 'decision-engine composition')
 
-  // One tool. Registration is scoped to the calling context, so a preset that
-  // mounts this plugin in one agent scope exposes the tool there only.
-  ctx.tools.register(defineDecideTool({ service: composition.service }))
+  // Both tools are scoped to the calling context, so a preset that mounts
+  // this plugin in one agent scope exposes them there only.
+  ctx.tools.register(defineDecideTool({ service: composition.service }, scope))
+  ctx.tools.register(defineRunTool(composition.service, scope))
 
   const skills = ctx.get('skills')
   if (skills !== undefined) {
@@ -214,7 +222,10 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.systemPrompt.section({
     name: 'tool:decision',
     order: 106,
-    text: 'The decision layer answers with a finite candidate set, never free-form actions: call '
+    text: 'Plan the task, then call `decision_run` once with its objective, ordered plan with completion conditions, and environment or API endpoint. '
+      + 'The executor owns observation, decisions, actions and completion checks; do not relay state or perform intermediate actions yourself. '
+      + 'The small model executes within the supplied plan. Verify the final result after it returns; do not intervene between steps. '
+      + 'It returns the final score/result, plan progress or an escalation. For an individual choice, the decision layer answers with a finite candidate set: call '
       + '`decision_decide` with an objective, the environment state (or an environment id), and the candidates. It '
       + 'decides by default; pass execute: true to run one mapped action, or execute: "loop" for a bounded loop. When '
       + 'the environment cannot express the task as structured state it returns status "needs_escalation" — take the '

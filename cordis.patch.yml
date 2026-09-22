@@ -1,5 +1,5 @@
 # dsh-decision-engine bundle patch: one host-plane row that brings the decision
-# layer, the Laya provider, the single `decision_decide` tool, and the
+# layer, the Laya provider, the `decision_decide` / `decision_run` tools, and the
 # `decision-control` skill into a profile.
 #
 # The row is host-plane because the layer is a singleton service

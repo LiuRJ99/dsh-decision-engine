@@ -6,6 +6,11 @@
 **通用决策层**：一个低延迟的 System-1 运行时，位于「环境」与「在环境里执行的动作」之间。
 它不绑定任何具体模型 —— Laya 只是第一个 Decision Provider，不是架构本身。
 
+支持两种工作方式：`decision_decide` 做单次决策或单步执行；`decision_run` 一次接收
+**大模型制定的目标、计划与完成条件**，由小模型独立执行整段流程。执行器直接读取和操作
+浏览器、电脑或外部接口，完成后返回结果供大模型验收，中途无需主 Agent 转发状态或点击下一步。
+接入示例、Mermaid 流程图和 HTTP 环境协议见 [任务接管协议](docs/任务接管协议.md)。
+
 ```text
 环境  →  Environment Adapter  →  Decision Request  →  Decision Engine
                                                              ↓
@@ -17,7 +22,7 @@
 ```
 
 把 Laya 换成规则引擎、ONNX 分类器、RL Policy 或别的模型，只是换一次注册；
-Browser / Computer / Custom 三个环境适配器**一行都不用改**。
+Browser / Computer / Custom / HTTP 环境适配器**一行都不用改**。
 
 ---
 
@@ -45,9 +50,9 @@ Browser / Computer / Custom 三个环境适配器**一行都不用改**。
 >
 > ```js
 > import { createDecisionLayer } from 'dsh-decision-engine/embed'
-> const decisions = createDecisionLayer({ modelDir: '/path/to/bundle' })
+> const decisions = createDecisionLayer({ laya: { modelDir: '/path/to/bundle' } })
 > decisions.environments.register(myGameAdapter)
-> const outcome = await decisions.decideEnvironment({ environment: 'my-game', objective: '赢下这一局。' })
+> const outcome = await decisions.runTask({ environment: 'my-game', objective: '赢下这一局。' })
 > ```
 >
 > 完整契约（两套角色、错误模型、HTTP 线格式、检查清单）在那个文档里。
@@ -69,7 +74,7 @@ dsh --profile web-candidate --dump-config      # 先验证，再提升到正式 
 ```
 
 包内声明了 `dsh.bundle.patch` → `cordis.patch.yml`，它插入**一行** host-plane 配置。
-唯一的公共工具 `decision_decide` 和 `/decision-control` skill 都由这一行注册。
+公共工具 `decision_decide`、`decision_run` 和 `/decision-control` skill 都由这一行注册。
 
 `lib/` 是**提交进仓库**的：git 安装拿到的就是可运行入口，不需要构建步骤（pnpm ≥ 10
 不会执行依赖的构建脚本）。`npm run build` 能从 `src/` 逐字节重建它，而且构建产物
@@ -319,11 +324,12 @@ registry.register(new JevDecisionProvider(), { enabled: true })
 
 | id | 传输方式 | 读取 | 什么情况下拒绝猜 |
 | --- | --- | --- | --- |
-| `browser` | 已注册的 `browser_*` 工具 | 结构化快照文本：标题、URL、带编号的交互清单、表单字段 | 纯 canvas/WebGL 页面、没有可交互元素、快照无法解析 |
-| `computer` | `ctx.computer` 缝，或 `computer_use_*` 工具 | daemon 渲染的无障碍树文本与元素索引 | 只有匿名 group 的树、没有可供合并的全量捕获的 diff、没有可寻址节点 |
+| `browser` | 已注册的 `browser_*` 工具 | 结构化快照文本：标题、URL、带编号的交互清单、表单字段 | 纯 canvas/WebGL 页面、快照无法解析；未完成却没有动作 |
+| `computer` | DSH 使用 `computer_use_*` 工具；独立 SDK 可注入 ComputerSeam | daemon 渲染的无障碍树文本与元素索引 | 只有匿名 group 的树、没有可供合并的全量捕获的 diff、没有可寻址节点 |
 | custom | 环境自己的回调 | 它自己暴露的结构化状态 | 它没有结构化状态 |
+| HTTP | `GET state` / `POST action` | `dsh-environment/v1` 状态、候选和最终结果 | 协议不合法、状态过期、任务实例切换 |
 
-三者都是**纯文本**：不请求、不读取、不分析任何截图。
+这些适配器读取文字或结构化数据，不请求、不读取、不分析任何截图。
 
 ### 一个完整的自定义环境
 

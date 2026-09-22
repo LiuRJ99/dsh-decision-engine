@@ -82,7 +82,7 @@ describe('promotion levels', () => {
 
   it('bounded-loop keeps going until the objective is met', async () => {
     // `doneAt` counts observations, and the loop observes once before deciding
-    // and once after executing, so three actions are needed before the fourth
+    // and reuses each post-action observation, so three actions precede the fourth
     // observation satisfies the predicate.
     const env = scriptedEnvironment({ states: [{ n: 0 }, { n: 1 }, { n: 2 }, { n: 3 }], doneAt: 4 })
     const { runtime } = harness({ decided: 'advance', environments: [env.adapter] })
@@ -93,8 +93,8 @@ describe('promotion levels', () => {
       config: { maxSteps: 10, noProgressLimit: 10, repeatedDecisionLimit: 10 },
     })
     assert.equal(outcome.status, 'done')
-    assert.equal(env.executed.length, 2)
-    assert.equal(outcome.steps, 2)
+    assert.equal(env.executed.length, 3)
+    assert.equal(outcome.steps, 3)
   })
 
   it('never exceeds maxSteps and reports budget_exhausted', async () => {

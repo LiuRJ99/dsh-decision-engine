@@ -21,9 +21,10 @@
  * @module dsh-decision-engine/tools/decision-decide
  */
 import { type ToolDefinition } from '@deepseek-ai/dsh-tools';
+import type { ToolExecutionScope } from './execution-scope.ts';
 import type { DecideToolContext } from './decide-logic.ts';
 export type { DecideCandidateInput, DecideToolContext, DecideToolInput, DecideToolOutput, } from './decide-logic.ts';
 export { executeDecide, executionModeOf, objectiveOf, preflightDecideInput, projectAction, projectOutcome, renderDecideOutput, } from './decide-logic.ts';
 /** Build the tool definition. */
-export declare function defineDecideTool(context: DecideToolContext): ToolDefinition;
+export declare function defineDecideTool(context: DecideToolContext, scope?: ToolExecutionScope): ToolDefinition;
 //# sourceMappingURL=decision-decide.d.ts.map

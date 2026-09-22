@@ -9,10 +9,10 @@
  * ```ts
  * import { createDecisionLayer } from 'dsh-decision-engine/embed'
  *
- * const decisions = createDecisionLayer({ modelDir: '/path/to/laya/bundle' })
+ * const decisions = createDecisionLayer({ laya: { modelDir: '/path/to/laya/bundle' } })
  * decisions.environments.register(myGameAdapter)
  *
- * const outcome = await decisions.decide({ environment: 'my-game', objective: 'Win.' })
+ * const outcome = await decisions.runTask({ environment: 'my-game', objective: 'Win.' })
  * ```
  *
  * It is deliberately NOT a second implementation: it composes the same engine,
@@ -32,7 +32,7 @@ import type { DecisionTelemetry, DecisionTelemetrySink } from './core/telemetry.
 import { createRingBufferSink } from './core/telemetry.ts'
 import { EnvironmentRegistry } from './environments/registry.ts'
 import type { EnvironmentAdapter, Objective } from './environments/types.ts'
-import { DecisionRuntime, type ExecutionMode, type RunOptions, type RuntimeConfig, type RuntimeConfigInput, type RuntimeOutcome } from './runtime/runner.ts'
+import { DecisionRuntime, type ExecutionMode, type RunOptions, type RuntimeConfig, type RuntimeConfigInput, type RuntimeOutcome, type TaskOptions, type TaskOutcome } from './runtime/runner.ts'
 import { CustomEnvironmentAdapter, type CustomEnvironmentSpec } from './environments/custom/adapter.ts'
 import { LayaDecisionProvider } from './providers/laya/provider.ts'
 import type { LayaConfig } from './providers/laya/config.ts'
@@ -78,6 +78,8 @@ export interface EmbeddedDecisionLayer {
    *   {@link EmbeddedDecisionLayer.decideEnvironment}.
    */
   decide(request: DecisionRequest): Promise<DecisionResult>
+  /** Run an independent task; no per-step caller intervention. */
+  runTask(options: Omit<TaskOptions, 'objective'> & { objective: Objective | string }): Promise<TaskOutcome>
   /**
    * Observe an environment, decide, map to a concrete action, and optionally
    * execute — returning the escalation shape rather than throwing when the layer
@@ -160,6 +162,7 @@ export function createDecisionLayer(options: EmbedOptions = {}): EmbeddedDecisio
       return runtime.resolveConfig()
     },
     decide: (request: DecisionRequest) => engine.decide(request),
+    runTask: options => runtime.runTask({ ...options, objective: typeof options.objective === 'string' ? { description: options.objective } : options.objective }),
     decideEnvironment: ({ environment, objective, mode, allowRisky, signal }) => runtime.run({
       environment,
       objective: typeof objective === 'string' ? { description: objective } : objective,
@@ -196,3 +199,7 @@ export function createDecisionLayer(options: EmbedOptions = {}): EmbeddedDecisio
 export { CustomEnvironmentAdapter }
 export type { CustomEnvironmentSpec }
 export type { EnvironmentAdapter, Objective, RunOptions, RuntimeOutcome, ExecutionMode }
+
+export { HttpEnvironmentAdapter, ENVIRONMENT_PROTOCOL } from './environments/http/adapter.ts'
+export type { EnvironmentSnapshot, EnvironmentActionRequest, HttpEnvironmentOptions } from './environments/http/adapter.ts'
+export type { TaskOptions, TaskOutcome, TaskPlanStep } from './runtime/runner.ts'

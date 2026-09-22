@@ -149,11 +149,12 @@ describe('browser observation', () => {
     assert.match(observation.reason ?? '', /canvas|structured state/)
   })
 
-  it('reports insufficient when the page has text but no controls', async () => {
+  it('preserves readable result pages without controls for completion checks', async () => {
     const page = new FakeBrowser({ main: 'A long paragraph of readable text with no controls at all, repeated for length. '.repeat(4) })
     const adapter = new BrowserEnvironmentAdapter({ dispatcher: page.dispatcher() })
     const observation = await adapter.observe()
-    assert.equal(observation.status, 'insufficient')
+    assert.equal(observation.status, 'ok')
+    assert.throws(() => adapter.buildDecisionRequest(observation, { description: 'Continue.' }), /no addressable action/)
   })
 
   it('never sends a screenshot: the required tool list is text-only', () => {

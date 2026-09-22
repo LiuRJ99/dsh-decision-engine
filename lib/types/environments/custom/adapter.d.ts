@@ -45,6 +45,7 @@ export interface CustomExecutionResult {
     state?: unknown;
     /** Whether the environment now considers the objective met. */
     done?: boolean;
+    result?: Record<string, unknown>;
 }
 /** The callbacks a custom environment supplies. */
 export interface CustomEnvironmentSpec<State = unknown> {
@@ -65,6 +66,8 @@ export interface CustomEnvironmentSpec<State = unknown> {
     execute(candidate: CustomCandidate<State>, input?: ExecuteInput): Promise<CustomExecutionResult> | CustomExecutionResult;
     /** Whether the objective is already met. Optional. */
     isDone?(state: State, objective: Objective): Promise<boolean> | boolean;
+    /** Extract a score/outcome for the final task report. */
+    result?(state: State): Record<string, unknown>;
     /** Objective text for the provider when the caller did not supply a specific one. */
     defaultObjective?: string;
     /** Optional human-readable one-line summary of a state. */
