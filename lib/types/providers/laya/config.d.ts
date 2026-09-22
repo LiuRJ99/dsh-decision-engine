@@ -19,6 +19,25 @@ export interface LayaConfig {
     /** Whether this provider is registered enabled. Defaults to true. */
     enabled?: boolean;
     /**
+     * Load the model when the plugin starts, instead of on the first decision.
+     *
+     * Defaults to **false**. One ONNX session pins the bundle's weights for as
+     * long as it is open (≈1.6 GB for the Laya bundle), so a deployment that never
+     * asks for a decision pays nothing. With `false` the first decision costs the
+     * load (~5 s warm cache) and later ones ~100 ms; with `true` the cost moves to
+     * startup.
+     */
+    autoLoad?: boolean;
+    /**
+     * Release the model after this many milliseconds without a decision. `0`
+     * (default) keeps it resident for the process lifetime.
+     *
+     * This is the memory/ latency dial: a resident session answers in ~100 ms but
+     * holds its weights; an idle-released one hands the memory back and pays the
+     * load again on the next decision.
+     */
+    idleTtlMs?: number;
+    /**
      * Directory holding `laya.onnx`, `laya.onnx.data`, `laya_config.json`, and
      * `tokenizer/`. When unset, the SDK's own cache/download resolution runs.
      * Environment fallbacks are honored: `LAYA_MODEL_DIR`, then
@@ -58,6 +77,8 @@ export interface LayaConfig {
 }
 /** Fully resolved Laya provider config. */
 export interface ResolvedLayaConfig {
+    autoLoad: boolean;
+    idleTtlMs: number;
     modelDir: string | undefined;
     executionProviders: string[];
     threads: number;

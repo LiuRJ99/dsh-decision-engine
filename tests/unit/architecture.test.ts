@@ -87,6 +87,39 @@ describe('provider boundary', () => {
     assert.deepEqual(violations, [])
   })
 
+  it('keeps provider vocabulary out of the neutral composition root', () => {
+    // The invariant is about the SHAPE of the public contract, not about local
+    // variable names: a provider may be named where it is wired, but its
+    // vocabulary must not reach a type or schema field, and its private
+    // settings must not become top-level config. Checking names would only
+    // fight the wiring this file exists to do.
+    const code = readFileSync(join(ROOT, 'src/composition.ts'), 'utf8')
+      .split('\n')
+      .filter(line => !/^\s*(\*|\/\/)/.test(line))
+      .join('\n')
+
+    for (const word of ['noul', 'rl_agent', 'entropy', 'softmax']) {
+      assert.ok(!new RegExp(`\\b${word}\\b`, 'i').test(code), `composition.ts uses provider vocabulary: ${word}`)
+    }
+
+    // No top-level config field names a provider's private setting. The
+    // anti-pattern the original specification calls out is
+    // `decisionEngine.layaModelPath`.
+    const topLevelFields = code.slice(code.indexOf('export interface Config'), code.indexOf('export const Config'))
+    for (const match of topLevelFields.matchAll(/^\s{2}(\w+)\??:/gm)) {
+      const field = match[1] ?? ''
+      assert.ok(
+        !/^(laya|jev|onnx|model)/i.test(field) || field === 'providers',
+        `Config has a provider-specific top-level field: ${field}`,
+      )
+    }
+
+    // The provider set is open: a second family is registered through the same
+    // generic seam, not by editing a provider-specific branch.
+    assert.match(code, /extraProviders\?:/)
+    assert.match(code, /providers\.register\(/)
+  })
+
   it('has no Laya import in the browser, computer, or custom environment adapters', () => {
     for (const adapter of [
       'src/environments/browser/adapter.ts',

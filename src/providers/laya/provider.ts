@@ -21,6 +21,7 @@ import type { DecisionCapability, DecisionContext, DecisionProvider, DecisionReq
 import type { LayaConfig } from './config.ts'
 import { planQuestions, toResult, translateAnswers } from './modes.ts'
 import { LayaRuntime, type LayaRuntimeOptions } from './runtime.ts'
+import { resolveLayaConfig } from './config.ts'
 
 /**
  * The provider.
@@ -40,7 +41,10 @@ export class LayaDecisionProvider implements DecisionProvider {
       ...options.config === undefined ? {} : { config: options.config },
       ...options.loadModule === undefined ? {} : { loadModule: options.loadModule },
       ...options.instance === undefined ? {} : { instance: options.instance },
-      autoLoad: options.autoLoad ?? false,
+      // Both defaults come from the resolved config, so `providers.laya.autoLoad`
+      // and `providers.laya.idleTtlMs` work without a code change.
+      autoLoad: options.autoLoad ?? resolveLayaConfig(options.config).autoLoad,
+      ...options.idleTtlMs === undefined ? {} : { idleTtlMs: options.idleTtlMs },
     })
   }
 
@@ -107,6 +111,8 @@ export class LayaDecisionProvider implements DecisionProvider {
       runtimeStatus: status,
       modelDir: this.#runtime.config.modelDir ?? null,
       loadMs: this.#runtime.loadMs,
+      idleTtlMs: this.#runtime.idleTtlMs,
+      unloads: this.#runtime.unloads,
       required: this.#runtime.config.required,
       stats: this.#runtime.stats,
     }

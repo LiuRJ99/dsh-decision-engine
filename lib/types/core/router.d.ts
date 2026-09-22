@@ -32,6 +32,18 @@ export declare class DecisionRouter {
     });
     /** The configured default provider id, if any. */
     get defaultProviderId(): string | undefined;
+    /** Whether a capability miss may fall back to another enabled provider. */
+    get allowCapabilityFallback(): boolean;
+    /**
+     * Re-point the default provider.
+     *
+     * @param id - a registered, enabled provider id, or undefined to fall back to
+     *   the first enabled provider.
+     * @throws DecisionError with `provider_unknown` or `provider_unavailable`.
+     */
+    setDefaultProvider(id: string | undefined): void;
+    /** Allow or forbid capability fallback. */
+    setAllowCapabilityFallback(allow: boolean): void;
     /**
      * Choose a provider for a request.
      *

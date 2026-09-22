@@ -111,7 +111,7 @@ export class DecisionEngine {
   readonly #registry: DecisionProviderRegistry
   readonly #router: DecisionRouter
   readonly #config: Required<Pick<DecisionEngineConfig, 'confidenceThreshold' | 'timeoutMs' | 'allowCapabilityFallback'>>
-  readonly #telemetry: DecisionTelemetrySink | undefined
+  #telemetry: DecisionTelemetrySink | undefined
   readonly #now: () => number
 
   constructor(config: DecisionEngineConfig = {}, registry: DecisionProviderRegistry = new DecisionProviderRegistry()) {
@@ -142,6 +142,21 @@ export class DecisionEngine {
   /** The configured confidence floor. */
   get confidenceThreshold(): number {
     return this.#config.confidenceThreshold
+  }
+
+  /**
+   * Apply a configuration change to the live engine.
+   *
+   * The engine holds no per-call state, so this is safe to call at any time —
+   * a decision already in flight keeps the values it started with. The default
+   * provider is re-pointed through the registry, which validates it.
+   */
+  reconfigure(config: DecisionEngineConfig): void {
+    if (config.confidenceThreshold !== undefined) this.#config.confidenceThreshold = config.confidenceThreshold
+    if (config.timeoutMs !== undefined) this.#config.timeoutMs = config.timeoutMs
+    if (config.allowCapabilityFallback !== undefined) this.#config.allowCapabilityFallback = config.allowCapabilityFallback
+    if (config.defaultProviderId !== undefined) this.#router.setDefaultProvider(config.defaultProviderId)
+    if (config.telemetry !== undefined) this.#setTelemetry(config.telemetry)
   }
 
   /**
@@ -313,6 +328,11 @@ export class DecisionEngine {
       if (timer !== undefined) clearTimeout(timer)
       if (options.signal !== undefined) options.signal.removeEventListener('abort', onAbort)
     }
+  }
+
+  /** Swap the telemetry sink, keeping the failure-containment wrapper. */
+  #setTelemetry(sink: DecisionTelemetrySink): void {
+    this.#telemetry = sink
   }
 
   #emit(record: DecisionTelemetry): void {

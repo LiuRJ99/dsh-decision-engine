@@ -42,9 +42,15 @@ export interface DecisionEngineService {
     readonly environments: EnvironmentRegistry;
     /** The bounded runtime that drives an environment. */
     readonly runtime: DecisionRuntime;
-    /** The confidence floor currently applied to acting decisions. */
+    /**
+     * The confidence floor currently applied to acting decisions.
+     *
+     * A getter, not a snapshot: the floor is editable at runtime through the
+     * plugin settings, and a stored value would keep reporting the value the
+     * process started with.
+     */
     readonly confidenceThreshold: number;
-    /** The configured runtime budgets. */
+    /** The runtime budgets currently in force. A getter for the same reason. */
     readonly runtimeConfig: import('./runtime/runner.ts').RuntimeConfig;
     /** Decide, forwarding to the engine. */
     decide(request: DecisionRequest, options?: EngineDecideOptions): Promise<DecisionResult>;

@@ -98,8 +98,30 @@ export interface LayaRuntimeOptions {
   loadModule?: LayaModuleLoader
   /** Pre-built instance (tests): skips loading entirely. */
   instance?: LayaInstance
-  /** Whether to start loading immediately. Defaults to true. */
+  /**
+   * Whether to start loading at construction.
+   *
+   * Defaults to **false**: one ONNX session pins the bundle's weights (≈1.6 GB
+   * for the Laya bundle) for as long as it is open, so a deployment that never
+   * asks for a decision should never pay for one. Loading happens on the first
+   * `systemOne`, which is what makes the first call cost ~5 s and every later
+   * call ~100 ms.
+   */
   autoLoad?: boolean
+  /**
+   * Release the session after this many milliseconds without a call. `0`
+   * (default) keeps it resident for the process lifetime — the fast choice.
+   * See {@link LayaRuntimeOptions.idleCheckIntervalMs} for how promptly it fires.
+   */
+  idleTtlMs?: number
+  /**
+   * How often to check the idle deadline. Defaults to the TTL itself, capped at
+   * 30 s, so a long TTL is not checked every second. `unref`'d, so it never
+   * keeps the process alive.
+   */
+  idleCheckIntervalMs?: number
+  /** Injectable timer, for tests. */
+  now?: () => number
 }
 
 /**
@@ -115,17 +137,41 @@ export class LayaRuntime {
   #loadMs = 0
   #queue: Promise<unknown> = Promise.resolve()
   readonly #stats: LayaRuntimeStats = { calls: 0, failures: 0, lastLatencyMs: 0, totalLatencyMs: 0, inputTokens: 0 }
+  readonly #idleTtlMs: number
+  readonly #idleCheckIntervalMs: number
+  readonly #now: () => number
+  #idleTimer: NodeJS.Timeout | undefined
+  #lastUsedAt = 0
+  #unloads = 0
 
   constructor(options: LayaRuntimeOptions = {}) {
     this.#config = resolveLayaConfig(options.config)
     this.#loadModule = options.loadModule ?? defaultLayaModuleLoader
+    this.#now = options.now ?? (() => Date.now())
+    this.#idleTtlMs = Math.max(0, options.idleTtlMs ?? this.#config.idleTtlMs)
+    // A short TTL is checked promptly, a long one at most every 30 s. The lower
+    // bound is deliberately small: it only guards against a busy loop, and a
+    // caller (or a test) asking for a 10 ms TTL means it.
+    this.#idleCheckIntervalMs = Math.max(5, options.idleCheckIntervalMs ?? Math.min(this.#idleTtlMs || 30_000, 30_000))
     if (options.instance !== undefined) {
       this.#instance = options.instance
       this.#status = 'ready'
       this.#loadPromise = Promise.resolve(options.instance)
+      this.#lastUsedAt = this.#now()
+      this.#armIdleTimer()
     } else if (options.autoLoad === true) {
       void this.load().catch(() => undefined)
     }
+  }
+
+  /** How many times an idle session has been released. */
+  get unloads(): number {
+    return this.#unloads
+  }
+
+  /** The configured idle TTL in milliseconds; `0` means "stay resident". */
+  get idleTtlMs(): number {
+    return this.#idleTtlMs
   }
 
   /** The resolved, environment-applied configuration. */
@@ -181,8 +227,10 @@ export class LayaRuntime {
         if (this.#config.threads > 0) options.sessionOptions = { intraOpNumThreads: this.#config.threads }
         const instance = await module.Laya.load(options)
         this.#instance = instance
-        this.#loadMs = Date.now() - started
+        this.#loadMs = this.#now() - started
         this.#status = 'ready'
+        this.#lastUsedAt = this.#now()
+        this.#armIdleTimer()
         return instance
       } catch (error) {
         const decisionError = error instanceof DecisionError
@@ -231,6 +279,10 @@ export class LayaRuntime {
         this.#stats.lastLatencyMs = Date.now() - started
         this.#stats.totalLatencyMs += this.#stats.lastLatencyMs
         this.#stats.inputTokens += result.usage?.input_tokens ?? 0
+        // Only touch the idle clock once the call is actually in flight, so a
+        // queued call cannot be unloaded out from under the queue.
+        this.#lastUsedAt = this.#now()
+        this.#armIdleTimer()
         return result
       } catch (error) {
         this.#stats.failures += 1
@@ -246,18 +298,58 @@ export class LayaRuntime {
     return next
   }
 
-  /** Release the ONNX session. */
-  async close(): Promise<void> {
+  /**
+   * Release the ONNX session, freeing its weights. The next call loads again.
+   *
+   * @returns whether a session was actually open.
+   */
+  async unload(): Promise<boolean> {
+    this.#clearIdleTimer()
     const instance = this.#instance
     this.#instance = undefined
     this.#loadPromise = undefined
-    this.#status = 'closed'
-    if (instance !== undefined) {
-      try {
-        await instance.close()
-      } catch {
-        // Closing is best-effort; the process is usually exiting.
-      }
+    if (instance === undefined) {
+      if (this.#status !== 'failed' && this.#status !== 'offline') this.#status = 'idle'
+      return false
     }
+    this.#status = 'idle'
+    this.#unloads += 1
+    try {
+      await instance.close()
+    } catch {
+      // Closing is best-effort: the session may already be gone.
+    }
+    return true
+  }
+
+  /** Release the session for good. A later call reloads, unlike {@link unload}'s idle case. */
+  async close(): Promise<void> {
+    await this.unload()
+    this.#status = 'closed'
+  }
+
+  /** Arm (or re-arm) the idle-release timer. No-op when the TTL is 0. */
+  #armIdleTimer(): void {
+    if (this.#idleTtlMs <= 0 || this.#instance === undefined) return
+    this.#clearIdleTimer()
+    const timer = setInterval(() => {
+      if (this.#instance === undefined) {
+        this.#clearIdleTimer()
+        return
+      }
+      if (this.#now() - this.#lastUsedAt < this.#idleTtlMs) return
+      // Fire-and-forget: releasing is idempotent, and a call arriving in the
+      // same tick simply reloads.
+      void this.unload().catch(() => undefined)
+    }, this.#idleCheckIntervalMs)
+    // Never hold the process open for a housekeeping timer.
+    if (typeof timer.unref === 'function') timer.unref()
+    this.#idleTimer = timer
+  }
+
+  #clearIdleTimer(): void {
+    if (this.#idleTimer === undefined) return
+    clearInterval(this.#idleTimer)
+    this.#idleTimer = undefined
   }
 }

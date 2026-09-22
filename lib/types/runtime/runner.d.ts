@@ -136,6 +136,15 @@ export declare class DecisionRuntime {
     /** The effective config for a run, given per-run overrides. */
     resolveConfig(overrides?: RuntimeConfigInput): RuntimeConfig;
     /**
+     * Replace the base budgets for subsequent runs.
+     *
+     * Environments are not rebuilt: their adapters hold per-observation state
+     * (a browser index inventory, an accessibility merge base) that a live swap
+     * would silently invalidate. Environment toggles therefore take effect on the
+     * next start, which is what the settings panel reports.
+     */
+    reconfigure(overrides: RuntimeConfigInput): void;
+    /**
      * Run the loop.
      *
      * @param options - environment, objective, promotion mode, budgets.

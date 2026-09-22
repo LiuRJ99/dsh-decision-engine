@@ -15,7 +15,7 @@ import type {} from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { toDecisionFailure } from './core/errors.ts'
 import { toolFailure, type ToolCallRequest, type ToolCallResult, type ToolDispatcher } from './environments/dispatch.ts'
-import { createDecisionEngineComposition, type Config } from './composition.ts'
+import { Config as ConfigSchema, createDecisionEngineComposition, type Config } from './composition.ts'
 import type { ComputerSeam } from './environments/computer/adapter.ts'
 import { defineDecideTool } from './tools/decision-decide.ts'
 import { queryCapabilityUnlocked, TOOL_LAZY_GATE_SERVICE } from './gate.ts'
@@ -25,7 +25,7 @@ import { DECISION_CONTROL_SKILL } from './skill.ts'
 export const name = 'decision-engine'
 
 /** Host services this plugin requires. Everything else is consumed opportunistically. */
-export const inject = ['tools']
+export const inject = ['tools', 'systemPrompt']
 
 /**
  * A {@link ToolDispatcher} over the host tool registry.
@@ -100,6 +100,29 @@ function requestAgent(ctx: Context): Agent | undefined {
  * @param ctx - host context with the tool registry.
  * @param config - validated plugin config.
  */
+/**
+ * Settings namespace the plugin owns.
+ *
+ * Registering it is what makes the **built-in plugin settings panel** render this
+ * plugin's configuration: the panel discovers namespaces from the settings
+ * service and renders each one's schemastery schema, which is why every field in
+ * `Config` carries a `.description()`. Nothing bespoke is needed here — the same
+ * mechanism that renders the lazy gate's capability list renders this.
+ */
+export const SETTINGS_NAMESPACE = 'decision-engine' as const
+
+/** The settings surface this plugin consumes, structurally typed. */
+interface SettingsSurface {
+  register(
+    ns: string,
+    schema: unknown,
+    options: { base?: unknown; applies?: 'live' | 'restart' },
+  ): {
+    get(): unknown
+    watch(listener: () => void): () => void
+  }
+}
+
 export function apply(ctx: Context, config: Config = {}): void {
   if (config.enabled === false) return
 
@@ -133,6 +156,60 @@ export function apply(ctx: Context, config: Config = {}): void {
   if (skills !== undefined) {
     ctx.effect(() => (skills as { register(skill: unknown): () => void }).register(DECISION_CONTROL_SKILL), 'decision-control skill')
   }
+
+  // Durable settings namespace. `base` seeds it from the composition entry
+  // (cordis.patch.yml), so the panel shows the effective values and only the
+  // fields a user actually changed are stored as overrides.
+  //
+  // `applies: 'live'` is honest but partial, and the panel says so through the
+  // field descriptions: engine and runtime budgets, the provider set, and the
+  // model residency settings take effect on the next decision, while the
+  // browser/computer environment toggles need a restart because their adapters
+  // hold per-observation state.
+  ctx.inject(['settings'], (settingsCtx) => {
+    const settings = (settingsCtx.get('settings') as unknown as SettingsSurface | undefined)
+    if (settings === undefined) return
+    const scope = settings.register(SETTINGS_NAMESPACE, ConfigSchema, {
+      base: config as Config,
+      applies: 'live',
+    })
+    ctx.effect(() => () => {
+      void scope
+    }, 'decision-engine settings')
+
+    // Apply changes to the live engine. `settings.get` resolves schema defaults,
+    // the composition base, and the user layer, so this is the same value the
+    // panel displays.
+    const applySettings = (): void => {
+      let resolved: Config
+      try {
+        resolved = scope.get() as Config
+      } catch {
+        return
+      }
+      if (resolved === undefined || resolved === null) return
+      try {
+        // Assign the fields explicitly rather than spreading a conditional
+        // object: a spread defeats excess-property checking, which is exactly
+        // how `observeTimeoutMs` (not an engine field) was silently dropped
+        // while the settings panel cheerfully stored it.
+        const engineConfig: Parameters<typeof composition.service.engine.reconfigure>[0] = {}
+        if (resolved.defaultProvider !== undefined) engineConfig.defaultProviderId = resolved.defaultProvider
+        if (resolved.runtime?.confidenceThreshold !== undefined) engineConfig.confidenceThreshold = resolved.runtime.confidenceThreshold
+        if (resolved.runtime?.observeTimeoutMs !== undefined) engineConfig.timeoutMs = resolved.runtime.observeTimeoutMs
+        composition.service.engine.reconfigure(engineConfig)
+        if (resolved.runtime !== undefined) composition.service.runtime.reconfigure(resolved.runtime)
+      } catch (error) {
+        // A half-edited settings document must not break decisions: the engine
+        // keeps its last good configuration. The refusal is logged rather than
+        // swallowed, because a silently ignored write is a configuration page
+        // that lies about what it applied.
+        ctx.logger?.warn?.('decision-engine: settings change was not applied: %s', error instanceof Error ? error.message : String(error))
+      }
+    }
+    applySettings()
+    ctx.effect(() => scope.watch(() => applySettings()), 'decision-engine settings watch')
+  })
 
   ctx.systemPrompt.section({
     name: 'tool:decision',

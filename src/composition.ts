@@ -63,8 +63,25 @@ export interface Config {
   enabled?: boolean
   /** Provider id used when a request does not name one. Defaults to the first enabled provider. */
   defaultProvider?: string
-  /** Per-provider settings, keyed by provider id. */
-  providers?: Record<string, Record<string, unknown>>
+  /**
+   * Per-provider settings, keyed by provider id.
+   *
+   * `laya` is declared explicitly so the settings panel renders its fields
+   * instead of an opaque dict; an additional provider family adds a sibling key.
+   * The index signature keeps an unknown provider id representable, because the
+   * file-backed settings document is user-editable and forward compatibility
+   * matters more here than a closed type.
+   */
+  providers?: {
+    /**
+     * The provider's own settings. Typed loosely here because the schema above
+     * describes these fields generically (it must not carry provider
+     * vocabulary); `LayaConfig` is the precise shape and
+     * `resolveLayaConfig` is what validates and defaults it.
+     */
+    laya?: Record<string, unknown>
+    [providerId: string]: Record<string, unknown> | undefined
+  }
   /** Runtime budgets and stop conditions. */
   runtime?: RuntimeConfigInput
   /** Browser environment settings. */
@@ -116,39 +133,122 @@ export type { BrowserActionCandidate }
 
 
 /** Schemastery schema, so the loader validates and defaults the config. */
+/**
+ * The plugin's configuration schema.
+ *
+ * Three uses at once, which is why it lives here rather than in `plugin.ts`:
+ *
+ * 1. the loader validates `cordis.patch.yml` against it;
+ * 2. `ctx.settings.register` uses it to render the **plugin settings panel** —
+ *    every `.description()` below is the help text that panel shows, so a field
+ *    without one is a field a user has to guess at;
+ * 3. `createDecisionEngineComposition` reads the defaults from it.
+ *
+ * `providers` stays a dict because provider-private settings belong under
+ * `providers.<id>` — a second model family adds a key, not a schema field.
+ */
 export const Config: z<Config> = z.object({
-  enabled: z.boolean().default(true),
-  defaultProvider: z.string(),
-  providers: z.dict(z.object({})),
+  enabled: z.boolean().default(true).description(
+    'Whether the decision layer is active at all. Turning this off removes the tool and stops answering decisions.',
+  ),
+  defaultProvider: z.string().description(
+    'Provider id used when a request does not name one (for example "laya"). Leave empty to use the first enabled provider.',
+  ),
+  providers: z.object({
+    // A named sub-object rather than a dict on purpose: a dict renders as an
+    // opaque `{}` in the settings panel, which would hide every provider knob
+    // (model path, residency, device) behind a hand-edited YAML file. A second
+    // provider family adds a sibling key here — provider-private settings still
+    // live under `providers.<id>`, never as top-level fields.
+    laya: z.object({
+      enabled: z.boolean().default(true).description('Whether the Laya provider is registered. Turn off to run the layer without a model.'),
+      modelDir: z.string().description(
+        'Directory holding laya.onnx, laya.onnx.data, laya_config.json and tokenizer/. '
+        + 'Setting it skips the SDK freshness check and its download entirely, which is required on a machine whose cache is not writable.',
+      ),
+      device: z.string().default('cpu').description('ONNX execution provider: cpu, coreml, cuda, dml or wasm — or a comma-separated list.'),
+      threads: z.number().description('intraOpNumThreads override. 0 leaves the runtime default.'),
+      autoLoad: z.boolean().default(false).description(
+        'Load the model at startup instead of on the first decision. Off by default: a session pins the weights (about 1.6 GB) for as long as it is open.',
+      ),
+      idleTtlMs: z.number().default(0).description(
+        'Release the model after this many milliseconds without a decision; the next decision reloads it. 0 keeps it resident for the process lifetime.',
+      ),
+      required: z.boolean().default(false).description('Treat an unavailable model as a hard failure instead of reporting the provider as degraded.'),
+      strictCandidates: z.boolean().default(true).description('Refuse a model answer that names an option which was not on the ballot.'),
+      // Deliberately a plain string, not the provider's own union: naming its
+      // literals here would put provider vocabulary in the neutral composition
+      // root, which is exactly the coupling this project exists to avoid.
+      // `resolveLayaConfig` validates the value; this schema only renders it.
+      classificationBinaryMode: z.string().default('choice').description(
+        'How a two-option classification is asked when the provider supports a binary head; '
+        + 'see the provider documentation for the accepted values.',
+      ),
+      scoreLevels: z.array(z.string()).description('Rating scale for ranking and score modes, lowest first.'),
+      scoringMode: z.string().default('per-candidate').description('Ratings strategy: "per-candidate" rates every option.'),
+      timeoutMs: z.number().default(30_000).description('Per-call budget hint in milliseconds.'),
+      maxStateChars: z.number().default(20_000).description('Maximum characters of serialized state sent to the model.'),
+    }).description('Laya: the first Decision Provider. Everything here is Laya-private.'),
+  }).description('Per-provider settings, keyed by provider id. Provider-private fields live here, never as top-level keys.'),
   runtime: z.object({
-    maxSteps: z.number().default(10),
-    maxDurationMs: z.number().default(120_000),
-    confidenceThreshold: z.number().default(0.55),
-    noProgressLimit: z.number().default(3),
-    repeatedDecisionLimit: z.number().default(3),
-    observeTimeoutMs: z.number().default(90_000),
-    executeTimeoutMs: z.number().default(90_000),
-    stepDelayMs: z.number().default(0),
-    stateFingerprintChars: z.number().default(2_000),
-  }),
+    maxSteps: z.number().default(10).description(
+      'Hard step limit for one bounded loop. The run escalates instead of exceeding it.',
+    ),
+    maxDurationMs: z.number().default(120_000).description(
+      'Hard wall-clock limit for one bounded loop, in milliseconds.',
+    ),
+    confidenceThreshold: z.number().default(0.55).description(
+      'Confidence floor, applied ONLY to decisions whose provider declares confidenceKind "normalized". '
+      + 'A provider reporting its own scale (provider_raw) or none (unavailable) is never compared with it.',
+    ),
+    noProgressLimit: z.number().default(3).description(
+      'Stop a loop after this many consecutive steps in which the environment state did not change.',
+    ),
+    repeatedDecisionLimit: z.number().default(3).description(
+      'Stop a loop after the same candidate is chosen this many times in a row.',
+    ),
+    observeTimeoutMs: z.number().default(90_000).description(
+      'Budget for one observation, and the default provider budget for a single decision, in milliseconds.',
+    ),
+    executeTimeoutMs: z.number().default(90_000).description(
+      'Budget for executing one environment action, in milliseconds.',
+    ),
+    stepDelayMs: z.number().default(0).description(
+      'Pause between loop steps, in milliseconds, so a page or app can settle.',
+    ),
+    stateFingerprintChars: z.number().default(2_000).description(
+      'How many characters of environment state are compared to detect "no progress".',
+    ),
+  }).description('Budgets and stop conditions shared by every environment.'),
   browser: z.object({
-    enabled: z.boolean().default(true),
-    environmentId: z.string(),
-    maxCandidates: z.number(),
-    maxStateChars: z.number(),
-    candidates: z.array(z.any()),
-  }),
+    enabled: z.boolean().default(true).description('Whether the browser environment is available to the decision layer.'),
+    environmentId: z.string().description('Environment id to register it under. Defaults to "browser".'),
+    maxCandidates: z.number().description('Maximum number of page controls offered to the decider. Defaults to 12.'),
+    maxStateChars: z.number().description('How much page text is placed into the decision state. Defaults to 6000.'),
+    candidates: z.array(z.any()).description(
+      'Fixed candidate set. When set, the adapter offers exactly these instead of deriving them from the page.',
+    ),
+  }).description('Observes pages through the registered browser_* tools. Plain text only: never reads a screenshot.'),
   computer: z.object({
-    enabled: z.boolean().default(true),
-    environmentId: z.string(),
-    app: z.string(),
-    maxCandidates: z.number(),
-    maxStateChars: z.number(),
-    maxTreeNodes: z.number(),
-    captureTimeoutMs: z.number(),
-  }),
-  telemetryLimit: z.number().default(200),
+    enabled: z.boolean().default(true).description('Whether the desktop (accessibility) environment is available.'),
+    environmentId: z.string().description('Environment id to register it under. Defaults to "computer".'),
+    app: z.string().description(
+      'Target app: bundle id, display name, or path. Take it from computer_use_list_apps. '
+      + 'A display name often fails where the bundle id works.',
+    ),
+    maxCandidates: z.number().description('Maximum number of accessibility elements offered to the decider. Defaults to 12.'),
+    maxStateChars: z.number().description('How much accessibility-tree text is placed into the decision state. Defaults to 8000.'),
+    maxTreeNodes: z.number().description('Maximum accessibility nodes captured per observation. Defaults to 1200.'),
+    captureTimeoutMs: z.number().description(
+      'How long to wait for one accessibility capture before reporting it as unusable. Defaults to 30000. '
+      + 'A capture can block on a permission prompt, and a loop must not wait forever.',
+    ),
+  }).description('Drives apps through the accessibility tree. Never reads a screenshot and never infers coordinates from pixels.'),
+  telemetryLimit: z.number().default(200).description(
+    'How many recent telemetry records are kept in memory for diagnostics. Records hold counts, ids and timings — never page text or tree content.',
+  ),
 })
+
 
 
 /**
@@ -256,8 +356,14 @@ export function createDecisionEngineComposition(options: {
     providers,
     environments,
     runtime,
-    confidenceThreshold: engine.confidenceThreshold,
-    runtimeConfig: runtime.resolveConfig(),
+    // Getters, so a settings change is visible immediately instead of leaving a
+    // stale snapshot behind (the engine and runtime are reconfigured live).
+    get confidenceThreshold(): number {
+      return engine.confidenceThreshold
+    },
+    get runtimeConfig() {
+      return runtime.resolveConfig()
+    },
     decide: (request, decideOptions) => engine.decide(request, decideOptions),
     run: runOptions => runtime.run(runOptions),
     isCapabilityUnlocked: capability => options.readCapabilityGate?.(capability),

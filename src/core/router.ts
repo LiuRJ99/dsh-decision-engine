@@ -26,8 +26,8 @@ export interface RouteResult {
  */
 export class DecisionRouter {
   readonly #registry: DecisionProviderRegistry
-  readonly #defaultProviderId: string | undefined
-  readonly #allowCapabilityFallback: boolean
+  #defaultProviderId: string | undefined
+  #allowCapabilityFallback: boolean
 
   /**
    * @param registry - provider membership.
@@ -42,6 +42,28 @@ export class DecisionRouter {
   /** The configured default provider id, if any. */
   get defaultProviderId(): string | undefined {
     return this.#defaultProviderId
+  }
+
+  /** Whether a capability miss may fall back to another enabled provider. */
+  get allowCapabilityFallback(): boolean {
+    return this.#allowCapabilityFallback
+  }
+
+  /**
+   * Re-point the default provider.
+   *
+   * @param id - a registered, enabled provider id, or undefined to fall back to
+   *   the first enabled provider.
+   * @throws DecisionError with `provider_unknown` or `provider_unavailable`.
+   */
+  setDefaultProvider(id: string | undefined): void {
+    if (id !== undefined) this.#registry.require(id)
+    this.#defaultProviderId = id
+  }
+
+  /** Allow or forbid capability fallback. */
+  setAllowCapabilityFallback(allow: boolean): void {
+    this.#allowCapabilityFallback = allow
   }
 
   /**

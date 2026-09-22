@@ -105,6 +105,14 @@ export declare class DecisionEngine {
     /** The configured confidence floor. */
     get confidenceThreshold(): number;
     /**
+     * Apply a configuration change to the live engine.
+     *
+     * The engine holds no per-call state, so this is safe to call at any time —
+     * a decision already in flight keeps the values it started with. The default
+     * provider is re-pointed through the registry, which validates it.
+     */
+    reconfigure(config: DecisionEngineConfig): void;
+    /**
      * Answer one decision request.
      *
      * @param request - objective, state, finite candidates, optional mode/provider.

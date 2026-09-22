@@ -38,6 +38,16 @@ export declare class HostToolDispatcher implements ToolDispatcher {
  * @param ctx - host context with the tool registry.
  * @param config - validated plugin config.
  */
+/**
+ * Settings namespace the plugin owns.
+ *
+ * Registering it is what makes the **built-in plugin settings panel** render this
+ * plugin's configuration: the panel discovers namespaces from the settings
+ * service and renders each one's schemastery schema, which is why every field in
+ * `Config` carries a `.description()`. Nothing bespoke is needed here — the same
+ * mechanism that renders the lazy gate's capability list renders this.
+ */
+export declare const SETTINGS_NAMESPACE: "decision-engine";
 export declare function apply(ctx: Context, config?: Config): void;
 /** Re-export the public surface so a plugin consumer imports one module. */
 export { createDecisionEngineComposition } from './composition.ts';

@@ -1,215 +1,290 @@
 # dsh-decision-engine
 
-A general-purpose, model-agnostic **decision layer** for
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH): a
-low-latency System-1 runtime that sits between an environment and the actions
-taken in it.
+[English](README-en.md) · **简体中文**
+
+给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）用的
+**通用决策层**：一个低延迟的 System-1 运行时，位于「环境」与「在环境里执行的动作」之间。
+它不绑定任何具体模型 —— Laya 只是第一个 Decision Provider，不是架构本身。
 
 ```text
-Environment  →  Environment Adapter  →  Decision Request  →  Decision Engine
-                                                                   ↓
-                                                          Decision Router
-                                                                   ↓
-                                                          Decision Provider
-                                                                   ↓
-Environment  ←  Action Mapper  ←  Decision Result  ←────────────────┘
+环境  →  Environment Adapter  →  Decision Request  →  Decision Engine
+                                                             ↓
+                                                      Decision Router
+                                                             ↓
+                                                     Decision Provider
+                                                             ↓
+环境  ←  Action Mapper  ←  Decision Result  ←────────────────┘
 ```
 
-Laya is the first provider, not the architecture. Swapping it for a rule engine,
-an ONNX classifier, an RL policy, or another model is a registry change; the
-browser, computer, and custom-environment adapters are untouched.
+把 Laya 换成规则引擎、ONNX 分类器、RL Policy 或别的模型，只是换一次注册；
+Browser / Computer / Custom 三个环境适配器**一行都不用改**。
 
-## The boundary this project enforces
+---
 
-| Layer | Responsibility | Never does |
+## 这个项目守住的边界
+
+| 层 | 负责 | 绝不做 |
 | --- | --- | --- |
-| **Environment** | observe structured state; execute real actions | decide |
-| **Environment Adapter** | observation → decision request; decision → concrete action | know which model answered |
-| **Decision Engine** | validate, route, enforce capability and deadlines, normalize | know a tool name or a model |
-| **Decision Provider** | answer a finite candidate set | emit a tool call, invent an action |
-| **Action Mapper** (in the adapter) | candidate id → `browser_click(index=17)` | interpret model output |
+| **Environment** | 观察结构化状态；执行真实动作 | 决策 |
+| **Environment Adapter** | 观察 → 决策请求；决策 → 具体动作 | 知道是谁做的决策 |
+| **Decision Engine** | 校验、路由、能力与超时约束、结果归一化 | 知道任何工具名或模型 |
+| **Decision Provider** | 在有限候选集里作答 | 输出 tool call、凭空造动作 |
+| **Action Mapper**（在适配器内） | 候选 id → `browser_click(index=17)` | 解释模型输出 |
 
-Three invariants are enforced by tests, not by convention
-(`tests/unit/architecture.test.ts`):
+三条不变量由**测试**保证，而不是靠约定（`tests/unit/architecture.test.ts`）：
 
-1. `core/`, `runtime/`, `environments/`, and `tools/` never import a provider.
-   Deleting `src/providers/laya/` leaves all of them compiling.
-2. No file outside `providers/laya/` mentions the Laya SDK, ONNX, or the
-   `choice`/`score`/`noul` question vocabulary.
-3. No decision provider ever learns a tool name (`browser_click`,
-   `computer_use_*`, …). Providers see candidate ids and descriptions.
+1. `core/`、`runtime/`、`environments/`、`tools/` 永不 import 任何 provider。
+   删掉 `src/providers/laya/`，它们仍然全部可编译、可运行。
+2. `providers/laya/` 之外的文件不出现 Laya SDK、ONNX，或 `choice`/`score`/`noul`
+   这套问句词汇。
+3. 任何 Decision Provider 都不会知道工具名（`browser_click`、`computer_use_*`……）。
+   Provider 只看到候选 id 和描述。
 
-## Install
+> 外部软件怎么接进来：见 [`docs/外部接入规范.md`](docs/外部接入规范.md)。
+> 该文档给出两套角色（Environment 侧、Provider 侧）的完整契约、错误模型和可直接抄的样例。
+
+---
+
+## 安装
 
 ```bash
-# from a pinned Git tag (the workspace's standard source form)
+# 从固定 tag 安装（本仓库推荐的方式）
 dsh plugin --profile web-candidate add github:LiuRJ99/dsh-decision-engine#v0.1.0
 
-# or from a local checkout / release tarball
+# 或用本地 checkout / release tarball
 dsh plugin --profile web-candidate add /path/to/dsh-decision-engine
 
-dsh --profile web-candidate --dump-config      # verify, then promote
+dsh --profile web-candidate --dump-config      # 先验证，再提升到正式 profile
 ```
 
-The package declares `dsh.bundle.patch` → `cordis.patch.yml`, which inserts one
-host-plane row. The single `decision_decide` tool and the `decision-control`
-skill are registered by that row.
+包内声明了 `dsh.bundle.patch` → `cordis.patch.yml`，它插入**一行** host-plane 配置。
+唯一的公共工具 `decision_decide` 和 `/decision-control` skill 都由这一行注册。
 
-`lib/` is **committed**, matching the other DSH plugins in this workspace: a
-git-hosted install receives a runnable entry without a build step, because
-pnpm ≥ 10 refuses to run a dependency's build script. `npm run build`
-regenerates it from `src/` byte-for-byte, so the committed artifacts can be
-checked against the sources.
+`lib/` 是**提交进仓库**的：git 安装拿到的就是可运行入口，不需要构建步骤（pnpm ≥ 10
+不会执行依赖的构建脚本）。`npm run build` 能从 `src/` 逐字节重建它，而且构建产物
+只依赖 `@deepseek-ai/schemastery`，所以脱离 DSH 进程也能 import 测试。
 
-### Enabling the Laya provider
+### 让 Laya Provider 真正工作
 
-`@receptron/laya` is an **optional** peer, imported dynamically: without it the
-plugin still loads, the provider reports `degraded`, and a decision fails with
-`provider_unavailable` — the host never fails to start. Installing the plugin
-alone therefore gives you the decision layer, the environments, and the tool;
-answering decisions needs the model runtime as well.
+`@receptron/laya` 是**可选** peer，用动态 import 加载。没装它时插件照常启动，
+provider 报 `degraded`，决策返回 `provider_unavailable` —— 宿主不会启动失败。
+所以「只装插件」得到的是决策层 + 环境 + 工具；要真正作答还需要模型运行时。
 
 ```bash
-# the model runtime (ONNX), in a directory the host process resolves from
+# 模型运行时（ONNX），装在宿主进程能解析到的位置
 pnpm add @receptron/laya
 ```
 
-The bundle itself (≈1.6 GB of ONNX weights) is then resolved by the SDK. Point
-at an existing export directory instead of downloading, either in config:
+模型本体（Laya bundle 约 1.6 GB）由 SDK 自己解析。想直接指向已有的导出目录，
+二选一：
 
 ```yaml
 providers:
   laya:
-    modelDir: /path/to/exported/bundle   # holds laya.onnx, laya_config.json, tokenizer/
+    modelDir: /path/to/exported/bundle   # 内含 laya.onnx、laya_config.json、tokenizer/
 ```
 
-or through the environment, which the provider reads first:
+或用环境变量（provider 优先读它）：
 
-| Variable | Meaning |
+| 变量 | 含义 |
 | --- | --- |
-| `LAYA_MODEL_DIR` | bundle directory; skips the SDK's download entirely |
-| `LAYA_EP` | execution providers, comma-separated (`cpu`, `coreml`, `cuda`, `dml`, `wasm`) |
-| `LAYA_THREADS` | `intraOpNumThreads` override |
-| `LAYA_CACHE`, `LAYA_REVISION`, `LAYA_SUBFOLDER` | where the SDK looks for a cached bundle |
+| `LAYA_MODEL_DIR` | bundle 目录；完全跳过 SDK 的下载逻辑 |
+| `LAYA_EP` | 执行后端，逗号分隔（`cpu`、`coreml`、`cuda`、`dml`、`wasm`） |
+| `LAYA_THREADS` | `intraOpNumThreads` 覆盖值 |
+| `LAYA_CACHE`、`LAYA_REVISION`、`LAYA_SUBFOLDER` | SDK 查找缓存 bundle 的位置 |
 
-Confirm it works before relying on it:
+**建议显式配置 `modelDir`**：`@receptron/laya@0.1.1` 的新鲜度检查把「读不到远端大小」
+当成 0 字节，于是每次加载都会重新下载 tokenizer.json；缓存目录不可写时直接 EPERM。
+给了 `modelDir` 就完全不碰这套逻辑。
+
+装完确认一下：
 
 ```bash
-node examples/verify-real-laya.mjs --mode choice    # loads the bundle and reports latency
+node examples/verify-real-laya.mjs --mode choice    # 加载 bundle 并报告延迟
 ```
 
-## Use
+---
 
-### As a tool
+## 使用
+
+### 作为工具
 
 ```jsonc
-// decide only — nothing is executed
+// 只决策，不执行任何动作
 {
-  "objective": "Advance the flow to Success.",
+  "objective": "推进当前流程",
   "state": { "step": "review", "fieldsFilled": true },
   "candidates": [
-    { "id": "submit", "description": "Submit the form" },
-    { "id": "edit", "description": "Keep editing" },
-    { "id": "wait", "description": "Wait for the page" }
+    { "id": "submit", "description": "提交表单" },
+    { "id": "edit", "description": "继续编辑" },
+    { "id": "wait", "description": "等待页面变化" }
   ]
 }
 ```
 
 ```jsonc
-// observe a browser/desktop environment, execute one mapped action
-{ "environment": "browser", "objective": "Advance the flow to Success.", "execute": true }
+// 观察浏览器/桌面环境，并执行一个映射出来的动作
+{ "environment": "browser", "objective": "把流程推进到成功页。", "execute": true }
 ```
 
 ```jsonc
-// bounded loop: observe → decide → map → execute → verify, until done or stopped
+// 有界循环：观察 → 决策 → 映射 → 执行 → 校验，直到完成或触发停止条件
 {
   "environment": "snake",
-  "objective": "Eat as much food as possible without dying.",
+  "objective": "尽量吃到食物且不要死。",
   "execute": "loop",
   "maxSteps": 24
 }
 ```
 
-### As a host service
+`state` 既可以是结构化对象，也可以是字符串 —— 文档里的最小示例就是传字符串。
+
+### 作为 host 服务
 
 ```ts
 const decision = await ctx.decisionEngine.decide({
-  objective: 'Choose the next step',
+  objective: '选择下一步',
   state,
   candidates,
 })
 decision.selected       // 'submit'
 decision.ranking        // [{ id: 'submit', score: 0.8 }, …]
 decision.confidence     // 0.84
-decision.confidenceKind // 'normalized' — what that number IS
-decision.latencyMs      // provider latency only
+decision.confidenceKind // 'normalized' —— 这个数字是什么尺度
+decision.latencyMs      // 仅 provider 耗时
 ```
 
-### Confidence: one number, one declared scale
+`ctx.decisionEngine` 还暴露 `providers`、`environments`、`runtime`、`health()`、
+`telemetry()`、`run()`。
 
-Confidence values are **not comparable across providers**: a softmax head, a
-classifier posterior, a rule margin, and an RL value estimate all live on
-different scales. The protocol therefore requires every confidence number to
-travel with a `confidenceKind`:
+### 置信度：一个数字，必须声明尺度
 
-| Kind | Meaning | Gated by `confidenceThreshold`? |
+不同 provider 的置信度**不可直接比较**：softmax head、分类器后验、规则引擎的 margin、
+RL 的 value 估计，各自一套尺度。因此协议要求每个置信度数字都必须带 `confidenceKind`：
+
+| kind | 含义 | 受 `confidenceThreshold` 约束？ |
 | --- | --- | --- |
-| `normalized` | the provider mapped its own number onto a comparable 0..1 scale | **yes** |
-| `provider_raw` | the provider's own number, on its own scale | no |
-| `unavailable` | this provider/mode cannot produce a comparable number | no |
+| `normalized` | provider 已把自身数值映射到可比较的 0..1 尺度 | **是** |
+| `provider_raw` | provider 自身尺度上的原值 | 否（只上报） |
+| `unavailable` | 该 provider / 该模式无法给出可比较数值 | 否（诚实的缺失，不是 0） |
 
-A confidence with no kind is rejected at validation, so a provider cannot
-silently ship an unlabelled number into a threshold comparison.
+缺少 kind 的置信度会在校验层被拒绝，所以 provider 无法把未标注的数字偷偷塞进阈值比较。
 
-The Laya provider reports `provider_raw`. That is a measurement, not caution: on
-the real bundle its entropy-derived confidence does not track decision quality
-(a state with no relevant information scores 0.039, a clear decision 0.15), and
-the option-dominance alternative ranks a torn decision above a clear one. See
-`examples/laya-head-calibration.mjs`. A calibrated head later changes one label
-in `providers/laya/modes.ts` and the global floor starts applying to it.
+Laya provider 报告 `provider_raw`，这是**测量结论**而不是保守选择：在真实 bundle 上，
+它的 entropy 置信度不反映决策质量（毫无信息的状态得 0.039，明确决策得 0.15），而
+选项优势度这个替代指标把刻意制造的两难排在明确决策之上。见
+`examples/laya-head-calibration.mjs`。将来若有校准过的 head，只需改
+`providers/laya/modes.ts` 里的一个标签，全局门限就会开始对它生效。
 
-`ctx.decisionEngine` also exposes `providers`, `environments`, `runtime`,
-`health()`, `telemetry()`, and `run()`.
+---
 
-## Configuration
+## 配置
+
+配置有三个来源，优先级从低到高：schema 默认值 → `cordis.patch.yml` 的 bundle 行 →
+设置面板写入的用户层。**改配置最简单的方式是内置的插件设置面板**（见下节），
+不必手改 YAML。
 
 ```yaml
 decisionEngine:
   enabled: true
   defaultProvider: laya
 
-  providers:            # provider-private settings live here, never at the top level
+  providers:              # provider 私有配置只在这里，绝不放到顶层
     laya:
       enabled: true
-      modelDir: /path/to/exported/bundle
-      device: cpu       # or coreml / cuda / dml / wasm, or a comma-separated list
+      modelDir: /path/to/bundle     # 强烈建议显式给
+      device: cpu                   # cpu / coreml / cuda / dml / wasm
       threads: 0
+      autoLoad: false               # 是否随 DSH 启动就加载模型
+      idleTtlMs: 0                  # >0 时空闲这么久就把模型释放掉
+      required: false               # true = 模型不可用即视为硬失败
+      strictCandidates: true        # 模型选了不在候选集里的 id 就报错
+      classificationBinaryMode: choice
+      scoreLevels: [...]            # 打分等级，从低到高
+      timeoutMs: 30000
+      maxStateChars: 20000
 
   runtime:
-    confidenceThreshold: 0.55   # NORMALIZED confidence only; see above
+    confidenceThreshold: 0.55       # 只对 normalized 生效
     maxSteps: 10
     maxDurationMs: 120000
-    noProgressLimit: 3
-    repeatedDecisionLimit: 3
+    noProgressLimit: 3              # 连续 N 步状态不变就停止
+    repeatedDecisionLimit: 3        # 连续 N 次选同一个就停止
+    observeTimeoutMs: 90000
+    executeTimeoutMs: 90000
+    stepDelayMs: 0
+    stateFingerprintChars: 2000
 
   browser:
     enabled: true
+    maxCandidates: 12
+    maxStateChars: 6000
+
   computer:
     enabled: true
-    # app: com.apple.TextEdit      # target app; omit until one is chosen
-    # captureTimeoutMs: 30000      # a capture that blocks on a permission prompt still settles
+    app: com.apple.TextEdit         # 用 bundle id，显示名经常解析不到
+    maxCandidates: 12
+    maxStateChars: 8000
+    maxTreeNodes: 1200
+    captureTimeoutMs: 30000         # 捕获卡住时的兜底
+
+  telemetryLimit: 200
 ```
 
-Environment variables the Laya provider honours (read only inside
-`providers/laya/config.ts`): `LAYA_MODEL_DIR`, `LAYA_EP`, `LAYA_THREADS`,
-`LAYA_CACHE`, `LAYA_REVISION`, `LAYA_SUBFOLDER`.
+### 通过内置设置面板配置
 
-## Adding a provider
+插件注册了 `decision-engine` 这个 settings 命名空间，所以 DSH 内置的**插件设置面板**
+会自动渲染上面这些字段（含每个字段的说明文字）—— 用的是和 lazy-gate 能力列表同一套机制，
+不需要任何自定义前端。
 
-Three steps, and none of them touches an environment:
+面板行为：
+
+- **立即生效的字段**：`enabled`、`defaultProvider`、`providers.*`、`runtime.*`。
+  写入后引擎、运行时限额、模型驻留设置立刻被重新配置，无需重启。
+- **需要重启的字段**：`browser.*`、`computer.*`。这两个环境适配器在观察之间持有内部状态
+  （浏览器的元素编号清单、无障碍树的合并基准），热替换会静默失效，所以刻意不热更新。
+- 面板读到的值是**当前生效值**：schema 默认、bundle 行、用户覆盖三层合并后的结果；
+  只有你真正改过的字段才会被记为「用户覆盖」。
+- 非法值会被 schema 拒绝，不会写进配置文件。
+
+配置文档落在 `$DSH_HOME/settings.yaml` 的 `decision-engine` 段（由 settings provider 管理）。
+
+---
+
+## 模型驻留机制（随启动 / 配置后 / 随用随关？）
+
+**默认是「随用随加载，加载后常驻」**。具体：
+
+| 时点 | 行为 |
+| --- | --- |
+| DSH 启动、插件 `apply()` | **不加载模型**。只注册 provider，会话不打开 |
+| 第一次 `decision_decide` | 加载（warm cache 约 5–6 秒），随后同一进程内复用 |
+| 之后的每次决策 | ~90–310 ms（按模式不同） |
+| 进程退出 | 随进程释放 |
+| `idleTtlMs > 0` 且空闲超时 | 主动 `close()` 释放权重，下次决策再加载 |
+
+为什么默认不随启动加载：一个 ONNX 会话会一直占住模型权重（Laya bundle 约 1.6 GB），
+从不做决策的部署不该付这个内存。
+
+想改变这个取舍，三个字段就够：
+
+```yaml
+providers:
+  laya:
+    autoLoad: true      # 随 DSH 启动加载：把 5 秒成本从第一次决策挪到启动
+    idleTtlMs: 300000   # 空闲 5 分钟后释放：省内存，代价是下次决策重新加载
+```
+
+`decisionEngine.health()` 会报告 `runtimeStatus`、`idleTtlMs`、`unloads`，可以据此观察。
+
+---
+
+## 加一个 Provider
+
+三步，且**不需要碰任何环境适配器**：
 
 ```ts
-// 1. implement the interface
+// 1. 实现接口
 class JevDecisionProvider implements DecisionProvider {
   readonly id = 'jev'
   readonly capabilities = ['choice', 'ranking', 'score', 'classification'] as const
@@ -217,28 +292,29 @@ class JevDecisionProvider implements DecisionProvider {
   async healthCheck(): Promise<ProviderHealth> { … }
 }
 
-// 2. register it (config, or the composition's extraProviders)
+// 2. 注册（配置，或组合根的 extraProviders）
 registry.register(new JevDecisionProvider(), { enabled: true })
 
-// 3. point the default at it
+// 3. 把默认指过去
 //    defaultProvider: jev
 ```
 
-`tests/integration/game-adapter.test.ts` executes exactly this claim: the same
-adapter, two different providers, identical mapped actions.
+`tests/integration/game-adapter.test.ts` 就是在执行这个说法：
+同一个适配器、两个不同 provider、映射出的动作词表完全一致。
 
-## Environments
+---
 
-| Id | Transport | Reads | Refuses to guess when |
+## 环境
+
+| id | 传输方式 | 读取 | 什么情况下拒绝猜 |
 | --- | --- | --- | --- |
-| `browser` | registered `browser_*` tools | structured snapshot text: title, url, numbered interactive inventory, form fields | canvas/WebGL-only pages, no interactive elements, unparseable snapshot |
-| `computer` | `ctx.computer` seam, or `computer_use_*` tools | the daemon's accessibility tree text and element indexes | anonymous-group-only trees, a diff with no full capture to merge onto, no addressable nodes |
-| custom | the environment's own callbacks | whatever structured state it exposes | it exposes none |
+| `browser` | 已注册的 `browser_*` 工具 | 结构化快照文本：标题、URL、带编号的交互清单、表单字段 | 纯 canvas/WebGL 页面、没有可交互元素、快照无法解析 |
+| `computer` | `ctx.computer` 缝，或 `computer_use_*` 工具 | daemon 渲染的无障碍树文本与元素索引 | 只有匿名 group 的树、没有可供合并的全量捕获的 diff、没有可寻址节点 |
+| custom | 环境自己的回调 | 它自己暴露的结构化状态 | 它没有结构化状态 |
 
-All three are **text-only**. No screenshot is requested, read, or analyzed
-anywhere in this package.
+三者都是**纯文本**：不请求、不读取、不分析任何截图。
 
-### A custom environment in full
+### 一个完整的自定义环境
 
 ```ts
 const snake = new CustomEnvironmentAdapter<SnakeState>({
@@ -251,27 +327,29 @@ const snake = new CustomEnvironmentAdapter<SnakeState>({
 registry.register(snake)
 ```
 
-## Permission boundaries
+游戏侧只需要提供「结构化状态」和「动作执行」两个能力，剩下全部由适配器负责。
+**本插件不为任何具体游戏做适配** —— 游戏要接入，按
+[`docs/外部接入规范.md`](docs/外部接入规范.md) 实现自己的适配器。
 
-The decision layer **does not own** browser or computer permission and cannot
-widen it:
+---
 
-- Environment actions are dispatched through the host's registered tools
-  (`ctx.tools.execute`), so they pass the same pre-execute policy, the same
-  session capability gate, the same approval seam, and the same timeout
-  wrappers as a model call.
-- The plugin *reads* the lazy gate (`ctx.toolLazyGate.isUnlocked`) only to
-  refuse early with an accurate message. It never installs a guard, never
-  grants a capability, and never reimplements the gate.
-- If `/browser` or `/computer-use` was not invoked by the user, the
-  environment call is refused exactly as a direct tool call would be, and the
-  decision layer escalates.
+## 权限边界
 
-## Escalation
+决策层**不拥有**浏览器/电脑权限，也无法扩大它：
 
-Every refusal is a typed reason, and every refusal returns the same shape
-(`status: 'needs_escalation'` plus `guidance`) so the main agent always learns
-the same thing. The vocabulary lives in `src/core/errors.ts`:
+- 环境动作全部经宿主的已注册工具派发（`ctx.tools.execute`），因此与模型调用走同一条
+  pre-execute 策略、同一套会话能力门禁、同一个 approval 缝、同一套超时包装。
+- 插件只**读取** lazy gate（`ctx.toolLazyGate.isUnlocked`）以便尽早给出准确的拒绝理由；
+  它从不安装 guard、从不授予能力、也从不重新实现门禁。
+- 用户没有执行 `/browser` 或 `/computer-use` 时，环境调用会被拒绝（与直接调用工具一样），
+  决策层随后升级回主 Agent。
+
+---
+
+## 升级（Escalation）
+
+每次拒绝都是一个带类型的理由，并返回统一形状（`status: 'needs_escalation'` + `guidance`），
+所以主 Agent 每次学到的都是同一件事。词表见 `src/core/errors.ts`：
 
 ```text
 provider_unknown  provider_unavailable  provider_unsupported_capability
@@ -282,86 +360,89 @@ action_mapping_failed  action_execution_failed  no_progress  repeated_decision
 budget_exhausted  aborted  needs_vision  needs_planning  high_risk_action  internal
 ```
 
-There is no `while (true)`: every loop is bounded by `maxSteps`, by
-`maxDurationMs`, and by the caller's abort signal.
+没有 `while (true)`：每个循环都被 `maxSteps`、`maxDurationMs` 和调用方的 abort signal 约束。
 
-## Development
+---
+
+## 开发
 
 ```bash
-npm run typecheck     # tsc --noEmit, strict + exactOptionalPropertyTypes
-npm test              # 187 tests, node:test, no build step
-npm run build         # esbuild entries + tsc declarations into lib/
-npm run bench         # per-layer latency table
+npm run typecheck     # tsc --noEmit，strict + exactOptionalPropertyTypes
+npm test              # 243 个测试，node:test，无需构建
+npm run build         # esbuild 入口 + tsc 声明，输出到 lib/
+npm run bench         # 分层延迟表
 ```
 
-### Verification scripts
+### 验证脚本
 
 ```bash
-# real ONNX provider, all four modes, latency + confidence-gate report
+# 真 ONNX provider，四种模式，延迟 + 置信度门限报告
 node examples/verify-real-laya.mjs --repeat 3
 
-# a REAL accessibility tree through the whole loop (listApps → capture → adapter
-# → DecisionRequest → Laya → mapped element-indexed action; nothing is clicked)
+# 真实无障碍树跑完整闭环（listApps → 捕获 → 适配器 → 决策请求 → Laya → 映射出的
+# 元素索引动作；不点击任何东西）
 node examples/verify-real-ax-loop.mjs --list
 node examples/verify-real-ax-loop.mjs --app com.apple.finder
 
-# why the Laya confidence is reported as provider_raw rather than normalized
+# 为什么 Laya 的置信度上报为 provider_raw 而不是 normalized
 node examples/laya-head-calibration.mjs --repeat 4
 
-# a game driven end to end, by the local heuristic and by the real model
+# 一个游戏端到端，分别用本地启发式和真模型
 node examples/demo-custom-game.mjs
 node examples/demo-custom-game.mjs --provider laya
 
-# one real desktop action through the decision layer (previews unless --yes)
+# 真桌面单步（默认只预览，--yes 才执行）
 node examples/verify-real-computer.mjs --app Finder
 
-# every public entry resolved through the package's `exports` map, including the
-# Cordis entry the bundle patch names (this is what caught a broken v0.1.0)
+# 每个公共入口都通过 package 的 exports map 用裸标识符解析
+# （就是它抓出了坏掉的 v0.1.0）
 node examples/verify-exports.mjs
 
-# the decision tool dispatched through a real ctx.tools registry
+# 设置面板：用真实文件后端注册命名空间，检查面板会渲染什么
+node examples/verify-settings-panel.mjs
+
+# 决策工具经真实 ctx.tools 注册表派发
 node examples/verify-host-integration.mjs
 
-# the plugin booted against a real Cordis context (run from a profile root)
-cd "$HOME/.dsh/profiles" && node <this repo>/examples/verify-plugin-boot.mjs
+# 插件对着真实 Cordis 上下文启动（在 profile 根目录下跑）
+cd "$HOME/.dsh/profiles" && node <本仓库>/examples/verify-plugin-boot.mjs
 
-# the browser flow fixture used by the browser integration test
+# 浏览器集成测试用的三态页面
 python3 -m http.server 8099 --directory tests/fixtures
 ```
 
-## Layout
+---
+
+## 目录结构
 
 ```text
 src/
-├── core/            the protocol: types, errors, validation, registry, router, engine, telemetry
-├── runtime/         the bounded runner (observe → decide → map → execute → verify)
-├── environments/    types, registry, dispatcher seam, browser/, computer/, custom/
-├── providers/laya/  the first provider: SDK runtime, mode translation, config
-├── tools/           decide-logic.ts (host-free) + decision-decide.ts (the tool)
-├── composition.ts   build the layer without a host
-├── plugin.ts        the Cordis entry (dispatcher, tool, skill, ctx.decisionEngine)
-├── gate.ts          read-only lazy-gate awareness
-└── skill.ts         the /decision-control skill
+├── core/            协议：类型、错误、校验、注册表、路由、引擎、telemetry
+├── runtime/         有界运行时（观察 → 决策 → 映射 → 执行 → 校验）
+├── environments/    类型、注册表、派发缝，以及 browser/、computer/、custom/
+├── providers/laya/  第一个 Provider：SDK 运行时、模式翻译、配置
+├── tools/           decide-logic.ts（无 host 依赖）+ decision-decide.ts（工具本体）
+├── composition.ts   不依赖 host 的组合根（含配置 schema）
+├── plugin.ts        Cordis 入口（派发器、注册工具、注册 skill、发布 ctx.decisionEngine）
+├── gate.ts          只读的 lazy-gate 感知
+└── skill.ts         /decision-control skill
+docs/
+└── 外部接入规范.md   外部软件接入的接口规范与样例
 ```
 
-## Limits
+---
 
-- No vision, no OCR, no screenshot understanding, no canvas CV, no coordinate
-  inference from pixels.
-- Canvas/WebGL/video-only pages and anonymous accessibility trees are
-  `environment_unsupported` / `insufficient_observation` — by design, not as a
-  gap to be filled by guessing.
-- The accessibility-tree parser is written against the daemon's current render
-  format (`[role] [title] Description: … (traits) Value: … Help: … ID: …
-  Secondary Actions: …`, tab-indented, depth-first index). That format is an
-  undocumented contract: the parser matches roles against the daemon's own
-  vocabulary and reports unrecognized lines instead of dropping them, and
-  `tests/unit/environments.test.ts` pins the format with verbatim captures.
-- Complex planning stays with the main agent: this layer chooses within a
-  candidate set, it does not generate plans.
-- No `while (true)`, no unbounded retry, no free-form action generation by a
-  provider.
+## 限制
 
-## License
+- 没有视觉、没有 OCR、没有截图理解、没有 canvas CV、不从像素推断坐标。
+- 纯 canvas/WebGL/video 页面、只有匿名 group 的无障碍树，都属于
+  `environment_unsupported` / `insufficient_observation` —— 这是设计，不是待补的缺口。
+- 复杂规划仍归主 Agent：这一层在给定候选集里做选择，不生成计划。
+- 没有 `while (true)`、没有无界重试、不允许 provider 自由生成动作。
+- 无障碍树解析器是按 daemon **当前**渲染格式写的；该格式是未声明契约，所以解析器按
+  daemon 自己的角色词表匹配、无法识别的行如实上报而不是丢弃，
+  `tests/unit/environments.test.ts` 用逐字抓取的真实捕获把它钉住。
+
+## 许可
 
 MIT

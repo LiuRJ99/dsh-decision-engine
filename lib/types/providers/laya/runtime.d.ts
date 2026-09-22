@@ -80,8 +80,30 @@ export interface LayaRuntimeOptions {
     loadModule?: LayaModuleLoader;
     /** Pre-built instance (tests): skips loading entirely. */
     instance?: LayaInstance;
-    /** Whether to start loading immediately. Defaults to true. */
+    /**
+     * Whether to start loading at construction.
+     *
+     * Defaults to **false**: one ONNX session pins the bundle's weights (≈1.6 GB
+     * for the Laya bundle) for as long as it is open, so a deployment that never
+     * asks for a decision should never pay for one. Loading happens on the first
+     * `systemOne`, which is what makes the first call cost ~5 s and every later
+     * call ~100 ms.
+     */
     autoLoad?: boolean;
+    /**
+     * Release the session after this many milliseconds without a call. `0`
+     * (default) keeps it resident for the process lifetime — the fast choice.
+     * See {@link LayaRuntimeOptions.idleCheckIntervalMs} for how promptly it fires.
+     */
+    idleTtlMs?: number;
+    /**
+     * How often to check the idle deadline. Defaults to the TTL itself, capped at
+     * 30 s, so a long TTL is not checked every second. `unref`'d, so it never
+     * keeps the process alive.
+     */
+    idleCheckIntervalMs?: number;
+    /** Injectable timer, for tests. */
+    now?: () => number;
 }
 /**
  * One Laya session, with a serial request queue.
@@ -89,6 +111,10 @@ export interface LayaRuntimeOptions {
 export declare class LayaRuntime {
     #private;
     constructor(options?: LayaRuntimeOptions);
+    /** How many times an idle session has been released. */
+    get unloads(): number;
+    /** The configured idle TTL in milliseconds; `0` means "stay resident". */
+    get idleTtlMs(): number;
     /** The resolved, environment-applied configuration. */
     get config(): ResolvedLayaConfig;
     /** Current runtime status. */
@@ -119,7 +145,13 @@ export declare class LayaRuntime {
      * @throws DecisionError with `provider_unavailable` when the model is not ready.
      */
     systemOne(state: unknown, questions: Record<string, LayaQuestionShape>, signal?: AbortSignal): Promise<LayaSystemOneResult>;
-    /** Release the ONNX session. */
+    /**
+     * Release the ONNX session, freeing its weights. The next call loads again.
+     *
+     * @returns whether a session was actually open.
+     */
+    unload(): Promise<boolean>;
+    /** Release the session for good. A later call reloads, unlike {@link unload}'s idle case. */
     close(): Promise<void>;
 }
 //# sourceMappingURL=runtime.d.ts.map

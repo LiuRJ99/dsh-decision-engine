@@ -58,8 +58,25 @@ export interface Config {
     enabled?: boolean;
     /** Provider id used when a request does not name one. Defaults to the first enabled provider. */
     defaultProvider?: string;
-    /** Per-provider settings, keyed by provider id. */
-    providers?: Record<string, Record<string, unknown>>;
+    /**
+     * Per-provider settings, keyed by provider id.
+     *
+     * `laya` is declared explicitly so the settings panel renders its fields
+     * instead of an opaque dict; an additional provider family adds a sibling key.
+     * The index signature keeps an unknown provider id representable, because the
+     * file-backed settings document is user-editable and forward compatibility
+     * matters more here than a closed type.
+     */
+    providers?: {
+        /**
+         * The provider's own settings. Typed loosely here because the schema above
+         * describes these fields generically (it must not carry provider
+         * vocabulary); `LayaConfig` is the precise shape and
+         * `resolveLayaConfig` is what validates and defaults it.
+         */
+        laya?: Record<string, unknown>;
+        [providerId: string]: Record<string, unknown> | undefined;
+    };
     /** Runtime budgets and stop conditions. */
     runtime?: RuntimeConfigInput;
     /** Browser environment settings. */
@@ -106,6 +123,20 @@ export interface ComputerEnvironmentConfig {
 /** One configurable candidate for the browser adapter's patch strategy. */
 export type { BrowserActionCandidate };
 /** Schemastery schema, so the loader validates and defaults the config. */
+/**
+ * The plugin's configuration schema.
+ *
+ * Three uses at once, which is why it lives here rather than in `plugin.ts`:
+ *
+ * 1. the loader validates `cordis.patch.yml` against it;
+ * 2. `ctx.settings.register` uses it to render the **plugin settings panel** —
+ *    every `.description()` below is the help text that panel shows, so a field
+ *    without one is a field a user has to guess at;
+ * 3. `createDecisionEngineComposition` reads the defaults from it.
+ *
+ * `providers` stays a dict because provider-private settings belong under
+ * `providers.<id>` — a second model family adds a key, not a schema field.
+ */
 export declare const Config: z<Config>;
 /**
  * Build the whole composition without touching Cordis.

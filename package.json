@@ -51,7 +51,9 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "README-en.md",
+    "LICENSE",
+    "docs"
   ],
   "dsh": {
     "bundle": {
