@@ -61,9 +61,42 @@ pnpm ≥ 10 refuses to run a dependency's build script. `npm run build`
 regenerates it from `src/` byte-for-byte, so the committed artifacts can be
 checked against the sources.
 
-`@receptron/laya` is an **optional** peer: it is imported dynamically. Without
-it the plugin still loads and the provider reports `degraded`; decisions fail
-with `provider_unavailable` instead of the host failing to start.
+### Enabling the Laya provider
+
+`@receptron/laya` is an **optional** peer, imported dynamically: without it the
+plugin still loads, the provider reports `degraded`, and a decision fails with
+`provider_unavailable` — the host never fails to start. Installing the plugin
+alone therefore gives you the decision layer, the environments, and the tool;
+answering decisions needs the model runtime as well.
+
+```bash
+# the model runtime (ONNX), in a directory the host process resolves from
+pnpm add @receptron/laya
+```
+
+The bundle itself (≈1.6 GB of ONNX weights) is then resolved by the SDK. Point
+at an existing export directory instead of downloading, either in config:
+
+```yaml
+providers:
+  laya:
+    modelDir: /path/to/exported/bundle   # holds laya.onnx, laya_config.json, tokenizer/
+```
+
+or through the environment, which the provider reads first:
+
+| Variable | Meaning |
+| --- | --- |
+| `LAYA_MODEL_DIR` | bundle directory; skips the SDK's download entirely |
+| `LAYA_EP` | execution providers, comma-separated (`cpu`, `coreml`, `cuda`, `dml`, `wasm`) |
+| `LAYA_THREADS` | `intraOpNumThreads` override |
+| `LAYA_CACHE`, `LAYA_REVISION`, `LAYA_SUBFOLDER` | where the SDK looks for a cached bundle |
+
+Confirm it works before relying on it:
+
+```bash
+node examples/verify-real-laya.mjs --mode choice    # loads the bundle and reports latency
+```
 
 ## Use
 
