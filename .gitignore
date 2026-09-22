@@ -15,6 +15,10 @@ node_modules/
 # Scratch directory created by examples/verify-exports.mjs.
 .exports-check/
 
+# Stray artifact from a settings/telemetry provider using an in-memory spec.
+:memory:*
+*.ses
+
 # The implementation report for this project is a session artifact, not part of
 # the plugin.
 实施报告.md
