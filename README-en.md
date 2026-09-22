@@ -229,6 +229,35 @@ registry.register(new JevDecisionProvider(), { enabled: true })
 `tests/integration/game-adapter.test.ts` executes exactly this claim: the same
 adapter, two different providers, identical mapped actions.
 
+### Building this into a non-DSH host
+
+External software (a game, a business system, a simulator) does not need DSH, a
+tool registry, or any of its services. One call embeds the same layer:
+
+```js
+import { createDecisionLayer } from 'dsh-decision-engine/embed'
+
+const decisions = createDecisionLayer({ modelDir: '/path/to/bundle' })
+decisions.environments.register(myGameAdapter)
+
+const outcome = await decisions.decideEnvironment({
+  environment: 'my-game',
+  objective: 'Win this round.',
+  mode: 'single-step',       // or 'decision-only' / 'bounded-loop'
+})
+```
+
+`decideEnvironment` returns the escalation as a **value** (serializable, with
+`guidance`) instead of throwing — the shape a bridge forwards. `decide` keeps
+throwing for a caller that wants the `code`.
+
+- [`docs/外部接入规范.md`](docs/外部接入规范.md) — the full external integration
+  contract: both roles, the request/result types, the mandatory `confidenceKind`
+  rule and its rejection cases, the escalation vocabulary, and an HTTP line
+  format for out-of-process integration (including why an escalation is a 200).
+- `examples/verify-embedding.mjs` — runs the whole embed path with **no DSH
+  package present**.
+
 ## Environments
 
 | Id | Transport | Reads | Refuses to guess when |
