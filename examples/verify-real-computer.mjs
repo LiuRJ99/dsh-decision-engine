@@ -197,6 +197,7 @@ const provider = {
       ...scored[0] === undefined ? {} : { selected: scored[0].id },
       ranking: scored,
       confidence: 0.5,
+      confidenceKind: 'provider_raw',
       latencyMs: 0,
     })
   },

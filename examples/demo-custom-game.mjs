@@ -131,6 +131,7 @@ const heuristicProvider = {
       selected: ranked[0]?.id,
       ranking: ranked,
       confidence: 0.6,
+      confidenceKind: 'provider_raw',
       latencyMs: 0,
     })
   },

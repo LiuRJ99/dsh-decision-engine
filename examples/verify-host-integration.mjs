@@ -146,6 +146,7 @@ const composition = createDecisionEngineComposition({
         mode: 'choice',
         selected: request.candidates[0]?.id,
         confidence: 0.9,
+        confidenceKind: 'provider_raw',
         latencyMs: 0,
       }),
     },

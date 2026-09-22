@@ -25,7 +25,7 @@ import type { DecisionRequest, DecisionResult } from '../../core/types.ts'
 import type { EnvironmentAction, EnvironmentAdapter, ExecuteInput, Objective, ObserveInput, Observation } from '../types.ts'
 import { failedObservation, okObservation } from '../types.ts'
 import { requireDispatcher, type ToolDispatcher } from '../dispatch.ts'
-import { describeAxNode, isActionable, isPassive, isSettable, parseAxTree, type AxCapture, type AxNode } from './ax-tree.ts'
+import { isAddressable, isPassive, isSettable, labelOf, mergeAxDiff, parseAxTree, type AxCapture, type AxNode } from './ax-tree.ts'
 
 /** Tool names of the computer-use family that this adapter dispatches. */
 export const COMPUTER_TOOLS = {
@@ -159,6 +159,13 @@ export class ComputerEnvironmentAdapter implements EnvironmentAdapter {
   readonly #config: Required<Omit<ComputerAdapterConfig, 'app' | 'candidates'>> & { app: string | undefined; candidates: ComputerActionCandidate[] | undefined }
   #pendingCandidates = new Map<string, ComputerActionCandidate>()
   #pendingApp: string | undefined
+  /**
+   * The last full capture per app, so a diff the provider returns can be
+   * overlaid onto it. The documented `ctx.computer` contract returns a diff for
+   * every capture after the first, and a diff alone cannot yield a candidate
+   * set — but previous-plus-diff can, exactly as the provider intends.
+   */
+  readonly #lastFullCapture = new Map<string, AxCapture>()
 
   constructor(options: { id?: string; seam?: ComputerSeam; dispatcher?: ToolDispatcher; config?: ComputerAdapterConfig }) {
     this.id = options.id ?? 'computer'
@@ -207,7 +214,19 @@ export class ComputerEnvironmentAdapter implements EnvironmentAdapter {
       })
     }
     this.#pendingApp = capture.app
-    const ax = parseAxTree(capture.text, capture.truncated)
+    const parsed = parseAxTree(capture.text, capture.truncated)
+    const ax = this.#resolveCapture(capture.app, parsed)
+    if (ax === undefined) {
+      // A diff with no preceding full capture: the tree cannot be reconstructed,
+      // so this is reported rather than guessed at.
+      return failedObservation('computer', 'insufficient',
+        'The provider returned a diff and no full capture of this app is available to reconstruct the tree from.', {
+          metadata: {
+            app: capture.app,
+            hint: 'Capture once with disableDiff, or capture the same app twice so the second capture can be merged.',
+          },
+        })
+    }
     return this.#observationFrom(capture.app, ax, capture.text)
   }
 
@@ -255,11 +274,16 @@ export class ComputerEnvironmentAdapter implements EnvironmentAdapter {
       state: {
         app: state.app,
         captureKind: state.ax.kind,
+        window: state.ax.window ?? null,
         nodes: state.ax.nodes.filter(node => !node.removed).map(node => ({
           index: node.index,
           role: node.role,
-          name: node.name,
+          label: labelOf(node),
           depth: node.depth,
+          ...node.value === undefined ? {} : { value: node.value },
+          ...node.disabled ? { disabled: true } : {},
+          ...node.settable ? { settable: true } : {},
+          ...node.secondaryActions.length === 0 ? {} : { secondaryActions: node.secondaryActions },
         })),
         truncated: state.ax.truncated,
         treeTextUntrusted: truncate(state.text, this.#config.maxStateChars),
@@ -428,6 +452,30 @@ export class ComputerEnvironmentAdapter implements EnvironmentAdapter {
       : { ok: false, message: result.error ?? `${toolName} failed` }
   }
 
+  /**
+   * Turn a parsed capture into a usable full tree.
+   *
+   * A full capture is stored as the merge base. A diff is overlaid onto it; a
+   * diff that announces no change reuses the stored tree as-is.
+   */
+  #resolveCapture(app: string, parsed: AxCapture): AxCapture | undefined {
+    if (parsed.kind === 'full') {
+      this.#lastFullCapture.set(app, parsed)
+      return parsed
+    }
+    const base = this.#lastFullCapture.get(app)
+    if (base === undefined) return undefined
+    const merged = mergeAxDiff(base, parsed)
+    if (merged === undefined) return base
+    const next: AxCapture = { ...base, kind: 'full', nodes: merged, unparsed: [] }
+    const appId = parsed.app ?? base.app
+    if (appId !== undefined) next.app = appId
+    const window = parsed.window ?? base.window
+    if (window !== undefined) next.window = window
+    this.#lastFullCapture.set(app, next)
+    return next
+  }
+
   #observationFrom(app: string, ax: AxCapture, text: string): Observation {
     const live = ax.nodes.filter(node => !node.removed)
     if (live.length === 0) {
@@ -435,9 +483,9 @@ export class ComputerEnvironmentAdapter implements EnvironmentAdapter {
         metadata: { app, textChars: text.length, unparsed: ax.unparsed.slice(0, 5) },
       })
     }
-    const addressable = live.filter(node => isActionable(node) || isSettable(node))
-    const named = live.filter(node => node.name !== '')
-    const groups = live.filter(node => node.role === 'AXGroup').length
+    const addressable = live.filter(node => isAddressable(node))
+    const named = live.filter(node => labelOf(node) !== `${node.role} ${node.index}`)
+    const groups = live.filter(node => node.role === 'group').length
     if (addressable.length === 0) {
       if (groups >= live.length && live.length > 1) {
         return failedObservation('computer', 'insufficient', 'The accessibility tree exposes only anonymous groups, which cannot express the current task.', {
@@ -452,11 +500,12 @@ export class ComputerEnvironmentAdapter implements EnvironmentAdapter {
     }
     if (ax.kind === 'diff') {
       return failedObservation('computer', 'insufficient', 'The provider returned a diff rather than a full tree, which cannot be used to build a candidate set.', {
-        metadata: { app, hint: 'Capture with disableDiff/cumulative_diff so a full tree is returned.' },
+        metadata: { app, hint: 'Capture with disableDiff, or capture the same app twice so the diff can be merged onto the first capture.' },
       })
     }
     return okObservation('computer', { app, ax, text }, {
-      summary: `${app} · ${live.length} node(s) · ${addressable.length} actionable · ${named.length} named`,
+      summary: `${app} · ${live.length} node(s) · ${addressable.length} actionable · ${named.length} named`
+        + `${ax.window === undefined ? '' : ` · window "${ax.window}"`}`,
       metadata: {
         app,
         nodeCount: live.length,
@@ -487,23 +536,30 @@ export class ComputerEnvironmentAdapter implements EnvironmentAdapter {
     }
     for (const node of ax.nodes) {
       if (candidates.length >= this.#config.maxCandidates) break
-      if (node.removed) continue
-      const label = node.name === '' ? describeAxNode(node) : node.name
-      if (isActionable(node)) {
-        push({
-          id: `click-${slug(label)}-${node.index}`,
-          description: `Click "${label}" (${node.role})`,
-          action: { kind: 'click', elementIndex: node.index },
-          metadata: { role: node.role, index: node.index },
-        })
-        continue
-      }
+      if (node.removed || node.disabled) continue
+      const label = labelOf(node)
+      // Editable controls first: `set_value` is the reliable action for them,
+      // and the daemon's own report is what says they are writable.
       if (isSettable(node)) {
         push({
           id: `set-${slug(label)}-${node.index}`,
           description: `Set the value of "${label}" (${node.role})`,
           action: { kind: 'set_value', elementIndex: node.index, value: '' },
-          metadata: { role: node.role, index: node.index },
+          metadata: { role: node.role, index: node.index, settable: true },
+        })
+        continue
+      }
+      if (isAddressable(node)) {
+        const actions = node.secondaryActions.length === 0 ? '' : ` — supports ${node.secondaryActions.join(', ')}`
+        push({
+          id: `click-${slug(label)}-${node.index}`,
+          description: `Click "${label}" (${node.role})${actions}`,
+          action: { kind: 'click', elementIndex: node.index },
+          metadata: {
+            role: node.role,
+            index: node.index,
+            ...node.secondaryActions.length === 0 ? {} : { secondaryActions: node.secondaryActions },
+          },
         })
         continue
       }

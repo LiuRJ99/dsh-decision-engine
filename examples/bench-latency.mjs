@@ -41,6 +41,7 @@ const fixedProvider = {
     selected: request.candidates[0]?.id,
     ranking: request.candidates.map((candidate, index) => ({ id: candidate.id, score: 1 - index * 0.1 })),
     confidence: 0.8,
+    confidenceKind: 'provider_raw',
     latencyMs: 0,
   }),
 }

@@ -116,6 +116,7 @@ function flowProvider(): ScriptedProvider {
         mode: 'choice',
         ...candidate === undefined ? {} : { selected: candidate.id },
         confidence: 0.91,
+        confidenceKind: 'provider_raw',
         latencyMs: 2,
       }
     },

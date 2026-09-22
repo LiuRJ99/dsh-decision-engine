@@ -167,6 +167,7 @@ class HeuristicSnakeProvider implements DecisionProvider {
       ...best === undefined ? {} : { selected: best.id },
       ranking: ranked,
       confidence: 0.7,
+      confidenceKind: 'provider_raw',
       latencyMs: 1,
     })
   }
@@ -248,6 +249,7 @@ describe('custom game environment', () => {
         mode: 'choice',
         ...request.candidates[0] === undefined ? {} : { selected: request.candidates[0].id },
         confidence: 0.9,
+        confidenceKind: 'provider_raw',
         latencyMs: 1,
       }),
     })

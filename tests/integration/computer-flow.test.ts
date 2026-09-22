@@ -56,20 +56,27 @@ class FakeDownloadDialog {
     this.#open = false
   }
 
-  /** The serialized AX tree for the current state. */
+  /**
+   * The serialized AX tree for the current state, in the daemon's real format
+   * (tab-indented depth, depth-first index, plain-language roles).
+   */
   tree(): string {
-    return this.#open
-      ? [
-          '[1] AXWindow "Download"',
-          '  [2] AXStaticText "Download complete"',
-          '  [3] AXButton "Open"',
-          '  [4] AXButton "Show in Finder"',
-          '  [5] AXButton "Close"',
-        ].join('\n')
-      : [
-          '[1] AXWindow "Download"',
-          '  [2] AXStaticText "No recent downloads"',
-        ].join('\n')
+    return [
+      'App=com.apple.Finder (pid 1)',
+      'Window: "Download", App: 访达.',
+      '0 standard window Download ID: MainWindow Secondary Actions: Raise',
+      '\t1 split group',
+      this.#open
+        ? '\t\t2 static text Value: Download complete'
+        : '\t\t2 static text Value: No recent downloads',
+      ...(this.#open
+        ? [
+            '\t\t3 button Open',
+            '\t\t4 button Show in Finder',
+            '\t\t5 button Close',
+          ]
+        : []),
+    ].join('\n')
   }
 
   seam(): ComputerSeam {
@@ -117,6 +124,7 @@ function dialogProvider(): ScriptedProvider {
         mode: 'choice',
         ...candidate === undefined ? {} : { selected: candidate.id },
         confidence: 0.86,
+        confidenceKind: 'provider_raw',
         latencyMs: 1,
       }
     },
@@ -242,7 +250,15 @@ describe('computer flow over the registered tool family', () => {
 
   it('maps a tool refusal to an escalation instead of retrying blindly', async () => {
     const dispatcher = createMapDispatcher({
-      computer_use_get_app_state: () => ({ ok: true, text: '[1] AXWindow "Download"\n  [3] AXButton "Open"' }),
+      computer_use_get_app_state: () => ({
+        ok: true,
+        text: [
+          'App=com.apple.Finder (pid 1)',
+          'Window: "Download", App: 访达.',
+          '0 standard window Download ID: MainWindow',
+          '\t1 button Open',
+        ].join('\n'),
+      }),
       computer_use_click: () => ({ ok: false, text: '', error: 'computer_use_click: the computer capability is not authorized in this session' }),
     })
     const adapter = new ComputerEnvironmentAdapter({ dispatcher, config: { app: 'Download' } })

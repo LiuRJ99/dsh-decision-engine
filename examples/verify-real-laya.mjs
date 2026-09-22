@@ -167,11 +167,12 @@ async function main() {
           const started = Date.now()
         const result = await provider.decide({ ...spec, mode: name }, { debug: true })
         const wallMs = Date.now() - started
-        samples.push({ mode: name, providerMs: result.latencyMs, wallMs, confidence: result.confidence })
+        samples.push({ mode: name, providerMs: result.latencyMs, wallMs, confidence: result.confidence, confidenceKind: result.confidenceKind })
         const ranked = (result.ranking ?? []).map(entry => `${entry.id}${entry.score === undefined ? '' : `=${entry.score.toFixed(3)}`}`).join(' > ')
         console.log(
           `${name.padEnd(15)} selected=${String(result.selected).padEnd(8)} `
-          + `confidence=${result.confidence === undefined ? 'n/a' : result.confidence.toFixed(3)} `
+          + `confidence=${result.confidence === undefined ? '   n/a' : result.confidence.toFixed(3)} `
+          + `(${result.confidenceKind ?? 'unlabelled'}) `
           + `providerMs=${String(result.latencyMs).padStart(5)} wallMs=${String(wallMs).padStart(5)}  ranking: ${ranked}`,
         )
         if (result.debug?.notes !== undefined && result.debug.notes.length > 0) {
@@ -185,13 +186,20 @@ async function main() {
   }
 
   console.log('')
-  console.log('confidence vs the default engine floor (0.55), for the gates that apply it:')
+  console.log('confidence vs the engine floor (0.55), which applies ONLY to normalized confidence:')
   for (const sample of samples) {
     if (sample.mode !== 'choice' && sample.mode !== 'classification') continue
-    const verdict = (sample.confidence ?? 0) >= 0.55 ? 'would act' : 'would escalate (low_confidence)'
-    console.log(`  ${sample.mode.padEnd(15)} confidence=${sample.confidence === undefined ? 'n/a' : sample.confidence.toFixed(3)} → ${verdict}`)
+    const gated = sample.confidenceKind === 'normalized' && sample.confidence !== undefined
+    const verdict = gated
+      ? ((sample.confidence ?? 0) >= 0.55 ? 'would act' : 'would escalate (low_confidence)')
+      : `not gated — the engine does not compare a ${sample.confidenceKind ?? 'missing'} number with a normalized floor`
+    console.log(
+      `  ${sample.mode.padEnd(15)} confidence=${sample.confidence === undefined ? '   n/a' : sample.confidence.toFixed(3)} `
+      + `(${sample.confidenceKind ?? 'unlabelled'}) → ${verdict}`,
+    )
   }
-  console.log('  (ranking and score modes are not confidence-gated: a rating is not a choice.)')
+  console.log('  This provider reports provider_raw, so a Laya decision is never refused for this number;')
+  console.log('  see examples/laya-head-calibration.mjs for why that number is not a usable gate.')
 
   const stats = provider.runtime.stats
   console.log('')

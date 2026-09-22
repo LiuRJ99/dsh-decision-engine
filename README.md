@@ -94,11 +94,35 @@ const decision = await ctx.decisionEngine.decide({
   state,
   candidates,
 })
-decision.selected      // 'submit'
-decision.ranking       // [{ id: 'submit', score: 0.8 }, …]
-decision.confidence    // 0.84
-decision.latencyMs     // provider latency only
+decision.selected       // 'submit'
+decision.ranking        // [{ id: 'submit', score: 0.8 }, …]
+decision.confidence     // 0.84
+decision.confidenceKind // 'normalized' — what that number IS
+decision.latencyMs      // provider latency only
 ```
+
+### Confidence: one number, one declared scale
+
+Confidence values are **not comparable across providers**: a softmax head, a
+classifier posterior, a rule margin, and an RL value estimate all live on
+different scales. The protocol therefore requires every confidence number to
+travel with a `confidenceKind`:
+
+| Kind | Meaning | Gated by `confidenceThreshold`? |
+| --- | --- | --- |
+| `normalized` | the provider mapped its own number onto a comparable 0..1 scale | **yes** |
+| `provider_raw` | the provider's own number, on its own scale | no |
+| `unavailable` | this provider/mode cannot produce a comparable number | no |
+
+A confidence with no kind is rejected at validation, so a provider cannot
+silently ship an unlabelled number into a threshold comparison.
+
+The Laya provider reports `provider_raw`. That is a measurement, not caution: on
+the real bundle its entropy-derived confidence does not track decision quality
+(a state with no relevant information scores 0.039, a clear decision 0.15), and
+the option-dominance alternative ranks a torn decision above a clear one. See
+`examples/laya-head-calibration.mjs`. A calibrated head later changes one label
+in `providers/laya/modes.ts` and the global floor starts applying to it.
 
 `ctx.decisionEngine` also exposes `providers`, `environments`, `runtime`,
 `health()`, `telemetry()`, and `run()`.
@@ -118,7 +142,7 @@ decisionEngine:
       threads: 0
 
   runtime:
-    confidenceThreshold: 0.55
+    confidenceThreshold: 0.55   # NORMALIZED confidence only; see above
     maxSteps: 10
     maxDurationMs: 120000
     noProgressLimit: 3
@@ -164,7 +188,7 @@ adapter, two different providers, identical mapped actions.
 | Id | Transport | Reads | Refuses to guess when |
 | --- | --- | --- | --- |
 | `browser` | registered `browser_*` tools | structured snapshot text: title, url, numbered interactive inventory, form fields | canvas/WebGL-only pages, no interactive elements, unparseable snapshot |
-| `computer` | `ctx.computer` seam, or `computer_use_*` tools | accessibility tree text and element indexes | anonymous-group-only trees, diff-only captures, no named or actionable nodes |
+| `computer` | `ctx.computer` seam, or `computer_use_*` tools | the daemon's accessibility tree text and element indexes | anonymous-group-only trees, a diff with no full capture to merge onto, no addressable nodes |
 | custom | the environment's own callbacks | whatever structured state it exposes | it exposes none |
 
 All three are **text-only**. No screenshot is requested, read, or analyzed
@@ -232,6 +256,14 @@ npm run bench         # per-layer latency table
 # real ONNX provider, all four modes, latency + confidence-gate report
 node examples/verify-real-laya.mjs --repeat 3
 
+# a REAL accessibility tree through the whole loop (listApps → capture → adapter
+# → DecisionRequest → Laya → mapped element-indexed action; nothing is clicked)
+node examples/verify-real-ax-loop.mjs --list
+node examples/verify-real-ax-loop.mjs --app com.apple.finder
+
+# why the Laya confidence is reported as provider_raw rather than normalized
+node examples/laya-head-calibration.mjs --repeat 4
+
 # a game driven end to end, by the local heuristic and by the real model
 node examples/demo-custom-game.mjs
 node examples/demo-custom-game.mjs --provider laya
@@ -271,6 +303,12 @@ src/
 - Canvas/WebGL/video-only pages and anonymous accessibility trees are
   `environment_unsupported` / `insufficient_observation` — by design, not as a
   gap to be filled by guessing.
+- The accessibility-tree parser is written against the daemon's current render
+  format (`[role] [title] Description: … (traits) Value: … Help: … ID: …
+  Secondary Actions: …`, tab-indented, depth-first index). That format is an
+  undocumented contract: the parser matches roles against the daemon's own
+  vocabulary and reports unrecognized lines instead of dropping them, and
+  `tests/unit/environments.test.ts` pins the format with verbatim captures.
 - Complex planning stays with the main agent: this layer chooses within a
   candidate set, it does not generate plans.
 - No `while (true)`, no unbounded retry, no free-form action generation by a

@@ -12,11 +12,29 @@ import type { DecisionResult } from '../../src/core/types.ts'
 import { BrowserEnvironmentAdapter } from '../../src/environments/browser/adapter.ts'
 import { looksCanvasLike, parseBrowserSnapshot } from '../../src/environments/browser/snapshot.ts'
 import { ComputerEnvironmentAdapter } from '../../src/environments/computer/adapter.ts'
-import { parseAxTree } from '../../src/environments/computer/ax-tree.ts'
+import { isAddressable, isPassive, isSettable, labelOf, parseAxTree } from '../../src/environments/computer/ax-tree.ts'
 import { CustomEnvironmentAdapter } from '../../src/environments/custom/adapter.ts'
 import { EnvironmentRegistry } from '../../src/environments/registry.ts'
 import { createMapDispatcher } from '../../src/environments/dispatch.ts'
 import { FakeBrowser } from '../helpers.ts'
+
+/**
+ * A real daemon capture, reduced to the fields under test. Indices are the
+ * addressing keys the action tools use, so they are kept verbatim (note the gap
+ * between 3 and 7: the daemon numbers every node depth-first).
+ */
+function realTree(buttonTitles: string[]): string {
+  const lines = ['App=com.apple.TextEdit (pid 1)', 'Window: "Downloads", App: 文本编辑.']
+  lines.push('0 standard window Downloads ID: MainWindow Secondary Actions: Raise')
+  lines.push('\t1 split group')
+  let index = 2
+  for (const title of buttonTitles) {
+    lines.push(`\t\t${index} button ${title}`)
+    index += 1
+  }
+  lines.push(`\t\t${index} static text Value: Download complete`)
+  return lines.join('\n')
+}
 
 const OBJECTIVE = { description: 'Complete the current page flow.' }
 
@@ -223,32 +241,117 @@ describe('browser action mapping and execution', () => {
 })
 
 describe('computer AX tree parsing', () => {
-  const TREE = [
-    '[1] AXWindow "Download"',
-    '  [2] AXStaticText "Download complete"',
-    '  [3] AXButton "Open"',
-    '  [4] AXButton "Show in Finder"',
-    '  [5] AXButton "Close"',
-    '  [6] AXGroup',
-    '    [7] AXTextField "Search"',
+  /**
+   * A verbatim slice of a real capture from the daemon
+   * (`computer_use_get_app_state` on Finder, reduced here). Every shape the
+   * parser has to handle appears in it: a tab-indented depth, a depth-first
+   * index, an unquoted multi-word role, an unquoted title, `Description:`,
+   * `(traits)` immediately before `Value:`, `ID:`, and `Secondary Actions:`.
+   */
+  const REAL_TREE = [
+    'App=com.apple.finder (pid 757)',
+    'Window: "dsh-work", App: 访达.',
+    '0 standard window dsh-work ID: FinderWindow Secondary Actions: Raise',
+    '\t1 split group',
+    '\t\t2 scroll area Secondary Actions: Scroll Left By Page, Scroll Right By Page',
+    '\t\t\t3 outline Description: 边栏 Secondary Actions: Show Menu',
+    '\t\t\t\t4 row Secondary Actions: Show Default U I, Show Alternate U I',
+    '\t\t\t\t\t5 cell Secondary Actions: Open',
+    '\t\t\t\t\t\t6 static text Value: 最近使用',
+    '\t\t\t\t\t\t7 image Description: 时钟',
+    '\t\t\t\t\t\t50 button 推出 Description: 推出 (disabled)',
+    '\t\t\t\t\t\t60 text field Value: search text (settable, string) Help: type to filter ID: searchField',
   ].join('\n')
 
-  it('parses nodes, roles, names, and depth', () => {
-    const capture = parseAxTree(TREE)
+  it('parses the real daemon format', () => {
+    const capture = parseAxTree(REAL_TREE)
     assert.equal(capture.kind, 'full')
-    assert.equal(capture.nodes.length, 7)
-    assert.equal(capture.nodes[0]?.role, 'AXWindow')
-    assert.equal(capture.nodes[0]?.depth, 0)
-    assert.equal(capture.nodes[6]?.depth, 2)
-    assert.equal(capture.nodes[2]?.name, 'Open')
+    assert.equal(capture.app, 'com.apple.finder')
+    assert.equal(capture.window, 'dsh-work')
+    assert.equal(capture.nodes.length, 10)
+    assert.deepEqual(capture.unparsed, [])
+  })
+
+  it('splits a multi-word role from an unquoted title', () => {
+    const capture = parseAxTree(REAL_TREE)
+    const window = capture.nodes[0]
+    assert.equal(window?.role, 'standard window')
+    assert.equal(window?.title, 'dsh-work')
+    assert.deepEqual(window?.secondaryActions, ['Raise'])
+    assert.equal(window?.identifier, 'FinderWindow')
+
+    const button = capture.nodes.find(node => node.index === 50)
+    assert.equal(button?.role, 'button')
+    assert.equal(button?.title, '推出')
+    // The daemon renders the disabled trait inside the description for a button,
+    // and the description keeps it verbatim while the trait is also recorded.
+    assert.equal(button?.description, '推出 (disabled)')
+    assert.equal(button?.disabled, true, 'the (disabled) trait must be read')
+  })
+
+  it('reads Value only through the parenthesized traits anchor', () => {
+    const capture = parseAxTree(REAL_TREE)
+    const cell = capture.nodes.find(node => node.index === 5)
+    assert.equal(cell?.role, 'cell')
+    assert.equal(cell?.value, undefined, 'a cell renders no Value field')
+
+    const text = capture.nodes.find(node => node.index === 6)
+    assert.equal(text?.role, 'static text')
+    assert.equal(text?.value, '最近使用')
+
+    const field = capture.nodes.find(node => node.index === 60)
+    assert.equal(field?.role, 'text field')
+    assert.equal(field?.value, 'search text')
+    assert.equal(field?.settable, true, 'the (settable, string) trait must be read')
+    assert.equal(field?.help, 'type to filter')
+    assert.equal(field?.identifier, 'searchField')
+  })
+
+  it('parses a multi-word description without swallowing later fields', () => {
+    const capture = parseAxTree('0 image dsh_workflow、21个项目 Description: dsh_workflow、21个项目 ID: dsh_workflow Secondary Actions: Open, Show Menu')
+    const node = capture.nodes[0]
+    assert.equal(node?.role, 'image')
+    assert.equal(node?.title, 'dsh_workflow、21个项目')
+    assert.equal(node?.description, 'dsh_workflow、21个项目')
+    assert.equal(node?.identifier, 'dsh_workflow')
+    assert.deepEqual(node?.secondaryActions, ['Open', 'Show Menu'])
+  })
+
+  it('keeps the depth-first index verbatim, including gaps', () => {
+    const capture = parseAxTree('0 button A\n\t\t9 button B')
+    assert.deepEqual(capture.nodes.map(node => node.index), [0, 9])
+    assert.deepEqual(capture.nodes.map(node => node.depth), [0, 2])
+  })
+
+  it('reports everything addressable, and why', () => {
+    const capture = parseAxTree(REAL_TREE)
+    const addressable = capture.nodes.filter(node => isAddressable(node))
+    // The window (Raise), the scroll area, the outline, the row, the cell, the
+    // image with a description but no actions... and NOT the disabled button,
+    // and NOT the static text without a settable value.
+    assert.deepEqual(addressable.map(node => node.index), [0, 2, 3, 4, 5, 7, 60])
+    assert.equal(isAddressable(capture.nodes.find(node => node.index === 50) as never), false, 'a disabled control is not addressable')
+    assert.equal(isAddressable(capture.nodes.find(node => node.index === 6) as never), false, 'read-only text is not addressable')
+    assert.equal(isSettable(capture.nodes.find(node => node.index === 60) as never), true)
+    assert.equal(isPassive(capture.nodes.find(node => node.index === 6) as never), true)
+  })
+
+  it('labels a node from its best available field', () => {
+    const capture = parseAxTree(REAL_TREE)
+    const window = capture.nodes[0]
+    assert.equal(labelOf(window as never), 'dsh-work', 'title wins')
+    const image = capture.nodes.find(node => node.index === 7)
+    assert.equal(labelOf(image as never), '时钟', 'description is the label for an icon')
+    const cell = capture.nodes.find(node => node.index === 5)
+    assert.equal(labelOf(cell as never), 'cell 5', 'last resort names the role and index, never empty')
   })
 
   it('recognizes a diff capture', () => {
     const capture = parseAxTree([
       '--- diff since last capture ---',
-      '[1] AXWindow "Download"',
-      '+ [3] AXButton "Open" added',
-      '- [8] AXButton "Cancel" removed',
+      '0 standard window x',
+      '+ 3 button Open',
+      '- 8 button Cancel',
     ].join('\n'))
     assert.equal(capture.kind, 'diff')
     assert.equal(capture.nodes.filter(node => node.added).length, 1)
@@ -256,7 +359,13 @@ describe('computer AX tree parsing', () => {
   })
 
   it('flags truncation from the provider marker', () => {
-    assert.equal(parseAxTree('[1] AXWindow "x"\n…(truncated at 1200 nodes)').truncated, true)
+    assert.equal(parseAxTree('0 button x\n... (accessibility tree truncated at the capture byte limit)').truncated, true)
+  })
+
+  it('falls back to the first word for a role outside the vocabulary', () => {
+    const capture = parseAxTree('4 some new role title here')
+    assert.equal(capture.nodes[0]?.role, 'some')
+    assert.equal(capture.nodes[0]?.title, 'new role title here')
   })
 })
 
@@ -276,7 +385,7 @@ describe('computer observation', () => {
 
   it('observes the accessibility tree and ignores the screenshot', async () => {
     const adapter = new ComputerEnvironmentAdapter({
-      seam: seamWith('[1] AXWindow "Download"\n  [3] AXButton "Open"\n  [4] AXButton "Close"'),
+      seam: seamWith(realTree(['Open', 'Close'])),
       config: { app: 'Download' },
     })
     const observation = await adapter.observe()
@@ -290,7 +399,7 @@ describe('computer observation', () => {
 
   it('reports insufficient when the tree is only anonymous groups', async () => {
     const adapter = new ComputerEnvironmentAdapter({
-      seam: seamWith('[1] AXGroup\n[2] AXGroup\n[3] AXGroup'),
+      seam: seamWith(['App=x (pid 1)', 'Window: "w", App: x.', '0 group', '\t1 group', '\t2 group'].join('\n')),
       config: { app: 'Weird' },
     })
     const observation = await adapter.observe()
@@ -300,7 +409,7 @@ describe('computer observation', () => {
 
   it('reports insufficient for a diff capture', async () => {
     const adapter = new ComputerEnvironmentAdapter({
-      seam: seamWith('--- diff ---\n[1] AXWindow "x"\n+ [2] AXButton "Open" added'),
+      seam: seamWith('--- diff since last capture ---\n0 standard window x\n+ 2 button Open'),
       config: { app: 'Download' },
     })
     const observation = await adapter.observe()
@@ -308,7 +417,7 @@ describe('computer observation', () => {
   })
 
   it('reports insufficient when no app is configured', async () => {
-    const adapter = new ComputerEnvironmentAdapter({ seam: seamWith('[1] AXButton "Open"') })
+    const adapter = new ComputerEnvironmentAdapter({ seam: seamWith(realTree(['Open'])) })
     const observation = await adapter.observe()
     assert.equal(observation.status, 'insufficient')
     assert.match(observation.reason ?? '', /No target app/)
@@ -317,7 +426,7 @@ describe('computer observation', () => {
   it('gives up on a capture that never answers, instead of hanging', async () => {
     const adapter = new ComputerEnvironmentAdapter({
       seam: {
-        ...seamWith('[1] AXButton "Open"'),
+        ...seamWith(realTree(['Open'])),
         getAppState: () => new Promise(() => undefined),
       },
       config: { app: 'Wedged', captureTimeoutMs: 20 },
@@ -330,7 +439,7 @@ describe('computer observation', () => {
   it('treats a capture that answers with nothing as a failure', async () => {
     const adapter = new ComputerEnvironmentAdapter({
       seam: {
-        ...seamWith('[1] AXButton "Open"'),
+        ...seamWith(realTree(['Open'])),
         getAppState: () => Promise.resolve(undefined as never),
       },
       config: { app: 'Empty' },
@@ -343,7 +452,7 @@ describe('computer observation', () => {
   it('reports unsupported when the capability refuses the capture', async () => {
     const adapter = new ComputerEnvironmentAdapter({
       seam: {
-        ...seamWith('[1] AXButton "Open"'),
+        ...seamWith(realTree(['Open'])),
         getAppState: () => Promise.reject(new Error('Accessibility permission is required')),
       },
       config: { app: 'Download' },
@@ -356,7 +465,7 @@ describe('computer observation', () => {
   it('maps a decision to an element-indexed click and executes it', async () => {
     const calls: Record<string, unknown>[] = []
     const seam = {
-      ...seamWith('[1] AXWindow "Download"\n  [3] AXButton "Open"\n  [4] AXButton "Close"'),
+      ...seamWith(realTree(['Open', 'Close'])),
       click: (request: Record<string, unknown>) => {
         calls.push(request)
         return Promise.resolve('clicked')
@@ -369,16 +478,18 @@ describe('computer observation', () => {
     assert.ok(open !== undefined)
     const action = adapter.mapDecision(decision(open.id), observation)
     assert.equal(action.kind, 'click')
-    assert.equal(action.target, 3)
+    // The index travels verbatim out of the real tree: "Open" is the first
+    // button, at index 2.
+    assert.equal(action.target, 2)
     assert.equal((await adapter.execute(action)).ok, true)
-    assert.equal(calls[0]?.elementIndex, 3)
+    assert.equal(calls[0]?.elementIndex, 2)
     assert.equal(calls[0]?.app, 'Download')
   })
 
   it('falls back to the tool path when no seam is mounted', async () => {
     const seen: Record<string, unknown>[] = []
     const dispatcher = createMapDispatcher({
-      computer_use_get_app_state: () => ({ ok: true, text: '[1] AXWindow "Download"\n  [3] AXButton "Open"' }),
+      computer_use_get_app_state: () => ({ ok: true, text: realTree(['Open']) }),
       computer_use_click: (args) => {
         seen.push(args)
         return { ok: true, text: 'clicked' }
@@ -543,5 +654,125 @@ describe('environment registry', () => {
   it('fails with environment_unknown for an unregistered id', () => {
     const registry = new EnvironmentRegistry()
     assert.throws(() => registry.require('nope'), (error: unknown) => error instanceof DecisionError && error.code === 'environment_unknown')
+  })
+})
+
+describe('computer diff merging', () => {
+  function seamText(text: string) {
+    return {
+      listApps: () => Promise.resolve('x'),
+      getAppState: () => Promise.resolve({ app: 'x', text, truncated: false, screenshot: null }),
+      click: () => Promise.resolve(),
+      typeText: () => Promise.resolve(),
+      pressKey: () => Promise.resolve(),
+      scroll: () => Promise.resolve(),
+      setValue: () => Promise.resolve(),
+    }
+  }
+
+  const FULL = [
+    'App=com.apple.TextEdit (pid 1)',
+    'Window: "doc", App: 文本编辑.',
+    '0 standard window doc',
+    '\t1 button Save',
+    '\t2 button Close',
+    '\t3 static text Value: hello',
+  ].join('\n')
+
+  it('merges a diff onto the previous full capture instead of refusing it', async () => {
+    let capture = 0
+    const adapter = new ComputerEnvironmentAdapter({
+      seam: {
+        ...seamText(FULL),
+        getAppState: () => {
+          capture += 1
+          if (capture === 1) return Promise.resolve({ app: 'x', text: FULL, truncated: false, screenshot: null })
+          return Promise.resolve({
+            app: 'x',
+            truncated: false,
+            screenshot: null,
+            // The daemon's real diff shape: an announcement, `+`/`~` lines in
+            // full, and removals collapsed into one id range.
+            text: [
+              'App=com.apple.TextEdit (pid 1)',
+              'The following is a diff from the previous accessibility tree',
+              '~ 3 static text Value: world',
+              '+ 4 button Undo',
+              'Removed element IDs: 2',
+            ].join('\n'),
+          })
+        },
+      },
+      config: { app: 'x' },
+    })
+
+    const first = await adapter.observe()
+    assert.equal(first.status, 'ok')
+    const firstRequest = adapter.buildDecisionRequest(first, { description: 'Save the file.' })
+    assert.ok(firstRequest.candidates.some(candidate => /Save/.test(candidate.description)))
+
+    const second = await adapter.observe()
+    assert.equal(second.status, 'ok', 'a diff must merge, not refuse')
+    const nodes = (second.state as { ax: { nodes: { index: number; value?: string }[] } }).ax.nodes
+    assert.deepEqual(nodes.map(node => node.index), [0, 1, 3, 4], 'close (2) is gone, undo (4) is added')
+    assert.equal(nodes.find(node => node.index === 3)?.value, 'world', 'the changed line was replaced')
+    const secondRequest = adapter.buildDecisionRequest(second, { description: 'Undo the change.' })
+    assert.ok(secondRequest.candidates.some(candidate => /Undo/.test(candidate.description)))
+    assert.ok(!secondRequest.candidates.some(candidate => /Close/.test(candidate.description)), 'a removed element is not offered')
+  })
+
+  it('treats the unchanged announcement as the same tree', async () => {
+    let capture = 0
+    const adapter = new ComputerEnvironmentAdapter({
+      seam: {
+        ...seamText(FULL),
+        getAppState: () => {
+          capture += 1
+          return Promise.resolve({
+            app: 'x',
+            truncated: false,
+            screenshot: null,
+            text: capture === 1
+              ? FULL
+              : 'App=com.apple.TextEdit (pid 1)\nThere has been no change in the accessibility tree for the previous capture.',
+          })
+        },
+      },
+      config: { app: 'x' },
+    })
+    assert.equal((await adapter.observe()).status, 'ok')
+    const second = await adapter.observe()
+    assert.equal(second.status, 'ok')
+    const request = adapter.buildDecisionRequest(second, { description: 'Save.' })
+    assert.ok(request.candidates.some(candidate => /Save/.test(candidate.description)))
+  })
+
+  it('still refuses a diff when there is no full capture to merge onto', async () => {
+    const adapter = new ComputerEnvironmentAdapter({
+      seam: seamText('The following is a diff from the previous accessibility tree\n~ 3 static text Value: world'),
+      config: { app: 'x' },
+    })
+    const observation = await adapter.observe()
+    assert.equal(observation.status, 'insufficient')
+    assert.match(observation.reason ?? '', /no full capture/)
+  })
+
+  it('does not mistake ordinary text for a diff', async () => {
+    // The regression: a Finder-style value containing the word "changed" must
+    // not make the whole capture look like a diff.
+    const adapter = new ComputerEnvironmentAdapter({
+      seam: seamText([
+        'App=com.apple.finder (pid 1)',
+        'Window: "w", App: 访达.',
+        '0 standard window w',
+        '\t1 static text Value: 3 items changed',
+        '\t2 button Open',
+      ].join('\n')),
+      config: { app: 'x' },
+    })
+    const observation = await adapter.observe()
+    assert.equal(observation.status, 'ok')
+    const request = adapter.buildDecisionRequest(observation, { description: 'Open it.' })
+    assert.ok(request.candidates.some(candidate => /Open/.test(candidate.description)))
   })
 })
