@@ -21,7 +21,10 @@
 
 - insert:
     - id: decision-engine
-      name: dsh-decision-engine
+      # The Cordis entry is the package's `./plugin` subpath: the root export is
+      # the host-free composition surface (importable without a DSH process),
+      # and `apply` lives here.
+      name: dsh-decision-engine/plugin
       config:
         enabled: true
         defaultProvider: laya
