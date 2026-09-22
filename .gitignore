@@ -7,3 +7,6 @@ lib/
 # pnpm
 .pnpm-store/
 .npmrc.local
+
+# Implementation report for this project
+实施报告.md
