@@ -108,6 +108,17 @@ export interface TaskPlanStep {
     completion: NonNullable<Objective['completion']>;
     /** Optional action limit for this stage, within the overall task budget. */
     maxSteps?: number;
+    /**
+     * What the driver may do while this stage is active.
+     *
+     * Handed to the environment adapter's `withConfig`, so the meaning of the keys
+     * belongs to the adapter: for the browser environment that is
+     * `includeNonSemantic`, `candidateSelector` and `maxCandidates`. A stage that
+     * narrows its scope removes the wrong choices instead of hoping the model
+     * ignores them — an advance step offering nothing but the navigation control
+     * cannot be answered with an answer option.
+     */
+    scope?: Record<string, unknown>;
 }
 /** Options for one {@link DecisionRuntime.run} call. */
 export interface RunOptions {

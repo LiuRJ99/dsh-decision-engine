@@ -127,6 +127,17 @@ export interface TaskPlanStep {
   completion: NonNullable<Objective['completion']>
   /** Optional action limit for this stage, within the overall task budget. */
   maxSteps?: number
+  /**
+   * What the driver may do while this stage is active.
+   *
+   * Handed to the environment adapter's `withConfig`, so the meaning of the keys
+   * belongs to the adapter: for the browser environment that is
+   * `includeNonSemantic`, `candidateSelector` and `maxCandidates`. A stage that
+   * narrows its scope removes the wrong choices instead of hoping the model
+   * ignores them — an advance step offering nothing but the navigation control
+   * cannot be answered with an answer option.
+   */
+  scope?: Record<string, unknown>
 }
 
 /** Options for one {@link DecisionRuntime.run} call. */
@@ -315,17 +326,35 @@ export class DecisionRuntime {
         options.signal?.removeEventListener('abort', onAbort)
       }
     }
+    // A stage may narrow what the driver is allowed to do. The adapter owns the
+    // meaning of a scope; an environment without `withConfig` ignores it, and a
+    // stage without a scope falls back to the adapter the caller registered.
+    let activeAdapter = adapter
+    let appliedStage: string | undefined
+    const applyStageScope = (stage: TaskPlanStep | undefined): void => {
+      const key = stage?.id ?? ''
+      if (key === appliedStage) return
+      appliedStage = key
+      activeAdapter = stage?.scope === undefined || typeof adapter.withConfig !== 'function'
+        ? adapter
+        : adapter.withConfig(stage.scope)
+    }
+    applyStageScope(plan?.[planIndex])
     const observe = (): Promise<Observation> => phase('observe', config.observeTimeoutMs,
-      (signal, timeoutMs) => adapter.observe({ signal, timeoutMs, objective }))
+      (signal, timeoutMs) => activeAdapter.observe({ signal, timeoutMs, objective }))
     const assertObservation = (observation: Observation): void => {
       if (observation.status === 'ok') return
       throw new DecisionError(observation.status === 'insufficient' ? 'insufficient_observation'
         : observation.status === 'unsupported' ? 'environment_unsupported' : 'environment_unavailable',
       observation.reason ?? `Environment "${adapter.id}" returned ${observation.status}.`)
     }
+    // Progress is judged on what the adapter calls progress — for a browser that
+    // is the page's meaning, not its element numbering.
+    const progressKey = (state: unknown): unknown =>
+      typeof activeAdapter.progressKey === 'function' ? activeAdapter.progressKey(state) : state
     const isDone = (observation: Observation): Promise<boolean> => phase('completion check', config.observeTimeoutMs, async () =>
       observation.done === true || completionMatches(observation.state, objective.completion)
-      || (await adapter.isDone?.(observation, objective)) === true)
+      || (await activeAdapter.isDone?.(observation, objective)) === true)
     const checkCompletion = async (observation: Observation): Promise<boolean> => {
       // Stage transitions use the planner's explicit predicates. The small
       // model chooses actions; it cannot silently rewrite or skip the plan.
@@ -334,6 +363,7 @@ export class DecisionRuntime {
           planIndex++
           planStartedAtStep = steps
         }
+        applyStageScope(plan[planIndex])
         if (planIndex === plan.length) return true
       }
       return isDone(observation)
@@ -372,7 +402,7 @@ export class DecisionRuntime {
           ...objective,
           description: `Current plan step (${stage.id}): ${stage.objective}\nOverall task: ${objective.description}`,
         }
-        let request = await phase('build request', config.observeTimeoutMs, () => adapter.buildDecisionRequest(lastObservation!, stepObjective))
+        let request = await phase('build request', config.observeTimeoutMs, () => activeAdapter.buildDecisionRequest(lastObservation!, stepObjective))
         if (options.candidates !== undefined) request = { ...request, candidates: options.candidates }
         if (options.provider !== undefined) request = { ...request, provider: options.provider }
         if (options.decisionMode !== undefined) request = { ...request, mode: options.decisionMode }
@@ -387,14 +417,14 @@ export class DecisionRuntime {
           },
         }))
         const mapStarted = this.#now()
-        lastAction = await phase('map action', config.executeTimeoutMs, () => adapter.mapDecision(lastDecision!, lastObservation!))
+        lastAction = await phase('map action', config.executeTimeoutMs, () => activeAdapter.mapDecision(lastDecision!, lastObservation!))
         previousMapMs = this.#now() - mapStarted
         if (mode === 'decision-only') return { ...outcome('decided', 'Decision-only mode: nothing was executed.'), steps: 1, stepIndex: 0 }
         if (lastAction.risky && options.allowRisky !== true) throw new DecisionError('high_risk_action', `Action "${lastAction.candidateId}" requires confirmation.`)
-        const before = fingerprintState(lastObservation.state, config.stateFingerprintChars)
+        const before = fingerprintState(progressKey(lastObservation.state), config.stateFingerprintChars)
         const executeStarted = this.#now()
         check()
-        lastExecution = await phase('execute', config.executeTimeoutMs, (signal, timeoutMs) => adapter.execute(lastAction!, {
+        lastExecution = await phase('execute', config.executeTimeoutMs, (signal, timeoutMs) => activeAdapter.execute(lastAction!, {
           signal, timeoutMs, allowRisky: options.allowRisky === true,
         }))
         steps += 1
@@ -418,7 +448,7 @@ export class DecisionRuntime {
         observeMs = this.#now() - verifyStarted
         assertObservation(lastObservation)
         if (await checkCompletion(lastObservation)) return outcome('done', 'The environment is terminal or the configured completion conditions are met.')
-        const after = fingerprintState(lastObservation.state, config.stateFingerprintChars)
+        const after = fingerprintState(progressKey(lastObservation.state), config.stateFingerprintChars)
         unchangedStreak = after !== undefined && after === before ? unchangedStreak + 1 : 0
         if (config.noProgressLimit > 0 && unchangedStreak >= config.noProgressLimit) throw new DecisionError('no_progress', `The state did not change for ${unchangedStreak} actions.`)
         repeatedStreak = lastDecision.selected === lastSelected ? repeatedStreak + 1 : 0
@@ -520,9 +550,11 @@ function validatePlan(plan: TaskPlanStep[] | undefined): void {
   const ids = new Set<string>()
   for (const stage of plan) {
     if (stage === null || typeof stage !== 'object' || typeof stage.id !== 'string' || stage.id.trim() === '' || ids.has(stage.id)
-      || typeof stage.objective !== 'string' || stage.objective.trim() === '' || stage.completion === undefined
-      || (stage.maxSteps !== undefined && (!Number.isInteger(stage.maxSteps) || stage.maxSteps <= 0))) {
-      throw new DecisionError('invalid_request', 'Each plan stage needs a unique id, an objective, a completion rule, and an optional positive integer maxSteps.')
+      || typeof stage.objective !== 'string' || stage.objective.trim() === ''
+      || stage.completion === undefined
+      || (stage.maxSteps !== undefined && (!Number.isInteger(stage.maxSteps) || stage.maxSteps <= 0))
+      || (stage.scope !== undefined && (stage.scope === null || typeof stage.scope !== 'object' || Array.isArray(stage.scope)))) {
+      throw new DecisionError('invalid_request', 'Each plan stage needs a unique id, an objective, a completion rule, and an optional positive integer maxSteps; scope, when present, must be an object.')
     }
     ids.add(stage.id)
     validateCompletion(stage.completion)

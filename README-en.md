@@ -214,6 +214,35 @@ Environment variables the Laya provider honours (read only inside
 `providers/laya/config.ts`): `LAYA_MODEL_DIR`, `LAYA_EP`, `LAYA_THREADS`,
 `LAYA_CACHE`, `LAYA_REVISION`, `LAYA_SUBFOLDER`.
 
+### Stage-level candidate scope (v0.4.0)
+
+Every stage of a plan may carry its own `scope`, applied while that stage is
+active — in the existing `plan` parameter of `decision_run`, with no new tool
+and no new argument. The keys belong to the adapter: the browser environment
+understands `includeNonSemantic`, `candidateSelector` and `maxCandidates`.
+
+It exists for flows where one item takes more than one decision — answering a
+question, then moving on. Offer both kinds of control at once and the model has
+to guess between them: it is pulled by the nouns in the objective and drifts
+with the state (measured on one run: the same objective picked the navigation
+control once and the submit control the next time). A stage scope removes the
+wrong choice instead of hoping it is ignored:
+
+```json
+"plan": [
+  { "id": "a-q1", "objective": "Choose the option you believe is correct",
+    "scope": { "includeNonSemantic": true, "candidateSelector": ".option-item" },
+    "completion": { "path": "main", "includes": "已答 1/49" }, "maxSteps": 3 },
+  { "id": "n-q1", "objective": "Go to the next question",
+    "scope": { "includeNonSemantic": true, "candidateSelector": "#next-btn" },
+    "completion": { "path": "main", "includes": "第 2 题" }, "maxSteps": 3 }
+]
+```
+
+A plan holds at most 64 stages; split longer work across calls. A stage without
+a scope keeps the call-level configuration, and adapters without `withConfig`
+ignore the field.
+
 ## Non-semantic browser controls
 
 From v0.3.0, `decision_run` and `decision_decide` accept task-local `browser`

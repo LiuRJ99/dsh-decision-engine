@@ -145,6 +145,34 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
   }
 
   /**
+   * What counts as progress: the page's meaning, not its addressing.
+   *
+   * The runtime fingerprints this to notice a stalled run. Element indices are
+   * addressing — the bridge numbers an element once and never reuses a number —
+   * so a page that rebuilds its controls returns new numbers for an unchanged
+   * situation. Fingerprinting the whole state then reports "changed" on every
+   * step and the stall guard never fires. Measured on a quiz page that
+   * re-created its answer options on every answer: 161 steps, two recorded
+   * answers, no `no_progress`.
+   */
+  progressKey(state: unknown): unknown {
+    if (state === null || typeof state !== 'object') return state
+    const snapshot = state as BrowserSnapshot
+    const strip = <T extends { index: number }>(entry: T): Omit<T, 'index'> => {
+      const { index: _index, ...rest } = entry
+      return rest
+    }
+    return {
+      url: snapshot.url,
+      title: snapshot.title,
+      status: snapshot.status,
+      main: snapshot.main,
+      interactive: (snapshot.items ?? []).map(strip),
+      forms: (snapshot.forms ?? []).map(strip),
+    }
+  }
+
+  /**
    * Read the page as structured text.
    *
    * A refused or failed snapshot becomes `unsupported`/`error`, never a guess:

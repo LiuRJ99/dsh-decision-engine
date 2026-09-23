@@ -86,6 +86,12 @@ export function defineRunTool(service: DecisionEngineService, scope?: ToolExecut
             id: { type: 'string', required: true },
             objective: { type: 'string', required: true, description: 'Actions and scope for this stage.' },
             maxSteps: { type: 'integer' },
+            scope: {
+              type: 'object', additionalProperties: true,
+              description: 'What the driver may do while this stage is active, interpreted by the environment adapter. '
+                + 'For the browser environment: candidateSelector, includeNonSemantic, maxCandidates. Narrowing a stage '
+                + 'removes the wrong choices instead of asking the model to ignore them.',
+            },
             completion: {
               type: 'object', required: true, additionalProperties: false,
               properties: {

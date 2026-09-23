@@ -238,6 +238,95 @@ describe('stop conditions', () => {
     assert.deepEqual(env2.executed, ['reset'])
   })
 
+  it('hands each plan stage its own scope through the adapter', async () => {
+    // A stage declares what the driver may do while it is active, and the
+    // adapter owns the meaning of that scope. This is what makes "answer this"
+    // and "advance now" two decisions instead of one guess among both kinds of
+    // control: the advance stage cannot be answered with an answer option
+    // because none is offered.
+    const scopes: string[] = []
+    let state: { text: string } = { text: 'q1' }
+    const make = (selector: string | undefined): EnvironmentAdapter => ({
+      id: 'scoped-env',
+      source: 'custom',
+      observe: async () => ({ status: 'ok', source: 'custom', state }),
+      buildDecisionRequest: () => ({
+        objective: 'stage',
+        state,
+        candidates: selector === 'options'
+          ? [{ id: 'answer', description: 'Answer the question' }]
+          : [{ id: 'advance', description: 'Go to the next question' }],
+        mode: 'choice' as const,
+      }),
+      mapDecision: (result) => ({ kind: 'custom', target: result.selected, candidateId: result.selected ?? '', description: 'x' }),
+      execute: async (action) => {
+        if (action.target === 'answer') state = { text: 'q1 answered' }
+        if (action.target === 'advance') state = { text: 'q2' }
+        return { ok: true, message: 'ok' }
+      },
+      withConfig: (scope) => {
+        const selector = (scope as { candidateSelector?: string }).candidateSelector
+        scopes.push(String(selector))
+        return make(selector)
+      },
+    })
+    const { runtime } = harness({ decided: ['answer', 'advance'], environments: [make(undefined)] })
+    const outcome = await runtime.run({
+      environment: 'scoped-env',
+      objective: { description: 'Work through the questions' },
+      mode: 'bounded-loop',
+      plan: [
+        { id: 'a1', objective: 'answer it', completion: { path: 'text', includes: 'answered' }, scope: { candidateSelector: 'options' }, maxSteps: 2 },
+        { id: 'n1', objective: 'go on', completion: { path: 'text', includes: 'q2' }, scope: { candidateSelector: 'nav' }, maxSteps: 2 },
+      ],
+    })
+    assert.equal(outcome.status, 'done')
+    assert.deepEqual(outcome.completedPlanSteps, ['a1', 'n1'])
+    assert.deepEqual(scopes, ['options', 'nav'])
+  })
+
+  it('judges progress on the adapter key, not on element numbering that churns', async () => {
+    // Indices are addressing. A page that rebuilds its controls returns new
+    // numbers for an unchanged situation, so a whole-state fingerprint reports
+    // "changed" forever and the stall guard never fires (measured on a quiz
+    // page: 161 steps, two recorded answers, no `no_progress`).
+    let calls = 0
+    const adapter: EnvironmentAdapter = {
+      id: 'churn-env',
+      source: 'custom',
+      observe: async () => {
+        calls += 1
+        return { status: 'ok', source: 'custom', state: { text: 'same', items: [{ index: calls, name: 'Next' }] } }
+      },
+      progressKey: (state) => {
+        const view = state as { text: string; items: { name: string }[] }
+        return { text: view.text, items: view.items.map(item => item.name) }
+      },
+      buildDecisionRequest: () => ({
+        objective: 'x', state: { text: 'same' },
+        candidates: [{ id: 'noop', description: 'Nothing changes' }], mode: 'choice' as const,
+      }),
+      mapDecision: (result) => ({ kind: 'custom', target: result.selected, candidateId: result.selected ?? '', description: 'x' }),
+      execute: async () => ({ ok: true, message: 'ok' }),
+    }
+    const { runtime } = harness({ decided: 'noop', environments: [adapter] })
+    const outcome = await runtime.run({ environment: 'churn-env', objective: { description: 'x' }, mode: 'bounded-loop' })
+    assert.equal(outcome.status, 'needs_escalation')
+    assert.match(outcome.stopReason ?? '', /did not change/)
+  })
+
+  it('rejects a plan stage whose scope is not an object', async () => {
+    const { runtime } = harness({ decided: 'advance', environments: [scriptedEnvironment({ states: ['a', 'b'] }).adapter] })
+    await assert.rejects(
+      () => runtime.run({
+        environment: 'scripted-env',
+        objective: { description: 'x' },
+        plan: [{ id: 's1', objective: 'x', completion: { path: 'text', includes: 'a' }, scope: [] as unknown as Record<string, unknown> }],
+      }),
+      /scope/,
+    )
+  })
+
   it('escalates aborted when the caller cancels', async () => {
     const env = scriptedEnvironment({ states: [{ n: 0 }, { n: 1 }] })
     const { runtime } = harness({ decided: 'advance', environments: [env.adapter] })

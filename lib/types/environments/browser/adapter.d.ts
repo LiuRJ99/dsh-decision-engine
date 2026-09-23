@@ -106,6 +106,18 @@ export declare class BrowserEnvironmentAdapter implements EnvironmentAdapter {
     /** Task-local configuration; never mutates the registered adapter. */
     withConfig(config: Pick<BrowserAdapterConfig, 'includeNonSemantic' | 'candidateSelector' | 'maxCandidates'>): BrowserEnvironmentAdapter;
     /**
+     * What counts as progress: the page's meaning, not its addressing.
+     *
+     * The runtime fingerprints this to notice a stalled run. Element indices are
+     * addressing — the bridge numbers an element once and never reuses a number —
+     * so a page that rebuilds its controls returns new numbers for an unchanged
+     * situation. Fingerprinting the whole state then reports "changed" on every
+     * step and the stall guard never fires. Measured on a quiz page that
+     * re-created its answer options on every answer: 161 steps, two recorded
+     * answers, no `no_progress`.
+     */
+    progressKey(state: unknown): unknown;
+    /**
      * Read the page as structured text.
      *
      * A refused or failed snapshot becomes `unsupported`/`error`, never a guess:

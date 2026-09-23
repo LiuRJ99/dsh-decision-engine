@@ -159,6 +159,24 @@ export interface EnvironmentAdapter {
     execute(action: EnvironmentAction, input?: ExecuteInput): Promise<ActionResult>;
     /** Whether the objective is already met. Environments that cannot tell omit this. */
     isDone?(observation: Observation, objective: Objective): Promise<boolean> | boolean;
+    /**
+     * A narrower view of this adapter with extra scope applied.
+     *
+     * The runtime calls it when a plan stage declares its own scope, so a stage
+     * can restrict what the driver may do while it is active — only the answer
+     * options while answering, only the navigation control while advancing.
+     * Adapters without such a notion omit it; a stage scope is then ignored.
+     */
+    withConfig?(scope: Record<string, unknown>): EnvironmentAdapter;
+    /**
+     * The part of a state that counts as *progress*.
+     *
+     * The runtime fingerprints this to notice a stalled run. Adapters override it
+     * to drop addressing that churns: element numbers are not state, so a page
+     * that rebuilds its controls hands back new numbers for an unchanged
+     * situation, and a whole-state fingerprint reports "changed" forever.
+     */
+    progressKey?(state: unknown): unknown;
     /** Release held resources. */
     dispose?(): Promise<void> | void;
 }

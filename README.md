@@ -273,6 +273,33 @@ v0.3.0 起可在 `decision_run` / `decision_decide` 的 `browser` 参数中临�
 插件会检查扩展是否确认候选范围，旧版扩展忽略参数时停止执行。
 识别动作不等于答对题；验收需确认答案记录、状态变化和业务完成，不能仅看循环结束。
 
+### 阶段级候选范围（v0.4.0）
+
+计划（`decision_run` 的 `plan`）里**每个阶段可以带自己的 `scope`**，进入该阶段时套用，
+不需要新工具也不需要新参数。`scope` 的键由环境适配器解释：浏览器环境认
+`includeNonSemantic` / `candidateSelector` / `maxCandidates`。
+
+这条能力解决的问题是"**每件事需要多次决策**"的流程（例如答题：先选答案，再点下一题）。
+把两类动作同时摆在候选里，模型就得在它们之间赌，而它会被目标里的名词牵引、随状态漂移 ——
+实测同一局里同样的目标，一次点对"下一题"、下一次点了"交卷"。
+**阶段级 scope 的做法是不给它错的选择**：
+
+```json
+"plan": [
+  { "id": "a-q1", "objective": "选出你认为正确的选项",
+    "scope": { "includeNonSemantic": true, "candidateSelector": ".option-item" },
+    "completion": { "path": "main", "includes": "已答 1/49" }, "maxSteps": 3 },
+  { "id": "n-q1", "objective": "进入下一题",
+    "scope": { "includeNonSemantic": true, "candidateSelector": "#next-btn" },
+    "completion": { "path": "main", "includes": "第 2 题" }, "maxSteps": 3 }
+]
+```
+
+- 阶段的**目标**、**动作范围**、**完成判据**都由规划者给；小模型只在范围内选动作。
+- 阶段推进只看判据（页面自己的标记），小模型**不能改写或跳过计划**。
+- 一个计划最多 64 个阶段；更长的流程拆成多次调用，每次一份计划。
+- 阶段没有 `scope` 时沿用调用级的配置；适配器没有 `withConfig` 时该字段被忽略。
+
 ### 通过内置设置面板配置
 
 插件注册了 `decision-engine` 这个 settings 命名空间，所以 DSH 内置的**插件设置面板**
