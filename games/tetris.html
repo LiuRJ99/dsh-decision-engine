@@ -295,19 +295,33 @@
        * 把盘面摊成页面文字、把四个策略立成真按钮。
        * 按钮文字用 core 的 `tetrisStrategyCriteria()`，与喂给模型的口径同源。
        *
-       * 堆叠**只画底部 12 行**：Laya 的窗口只有 512 token，页面文字太长会把候选清单
-       * 挤出上下文（实测：画满 20 行 → 模型看不到候选，跑去点别的按钮）。
-       * core 的 `tetrisLayaState` 也是取 12 行，这里跟它对齐。
+       * 盘面图必须和画布**逐格一致**：画布画的是「已固定块 + 当前方块 + 半透明落点预览」，
+       * 这张图就得是同样这三样东西，否则「决策层可读局面」和眼睛看到的是两个盘面
+       * （实测：只画 board 时当前方块的 4 格在图上凭空消失，画布上却明明有）。
+       * 所以这里按画布的口径自己拼图，并且**画满 20 行**、不截取底部 12 行 ——
+       * 截取会让"自第几行起"随局面变化，图和画布的行对齐又多一层出错的机会。
        */
       function renderTakeover() {
         const s = tetrisLayaState(state);
         const lines = [];
         lines.push(`棋盘 ${state.w}x${state.h}`);
-        lines.push(`分数=${s.lines_cleared === undefined ? state.score : state.score} 消行=${state.lines} 等级=${state.level} 已放=${state.pieces}`);
+        lines.push(`分数=${state.score} 消行=${state.lines} 等级=${state.level} 已放=${state.pieces}`);
         lines.push(`当前块=${s.current_piece ?? "无"} 旋转态=${s.current_rotation ?? "-"} 下一块=${s.next_piece ?? "?"}`);
-        lines.push(`各列高度=[${s.column_heights.join(",")}] 空洞=${s.holes}`);
-        lines.push(`堆叠（自第 ${state.h - s.stack.length + 1} 行起，. 为空，字母为已固定方块，G 为垃圾行）：`);
-        for (const row of s.stack) lines.push(row);
+        lines.push(`各列高度=[${s.column_heights.join(",")}] 空洞=${s.holes}（这两项只算已固定块，不含当前方块）`);
+        // 与 draw() 同一口径：board → 当前方块 → 落点预览
+        const grid = state.board.map(row => row.map(v => (v === 0 || v == null) ? "." : (String(v)[0] === "G" ? "G" : "#")));
+        const mark = (cells, ch) => {
+          for (const c of cells) {
+            if (c.y >= 0 && c.y < state.h && c.x >= 0 && c.x < state.w && grid[c.y][c.x] === ".") grid[c.y][c.x] = ch;
+          }
+        };
+        if (state.piece && alive()) {
+          mark(tetrisCells(state.piece.type, state.piece.rot, state.piece.x, state.piece.y), "@");
+          const gy = tetrisDropY(state, state.piece.type, state.piece.rot, state.piece.x);
+          if (gy !== null) mark(tetrisCells(state.piece.type, state.piece.rot, state.piece.x, gy), ":");
+        }
+        lines.push("堆叠（# 已固定，G 垃圾行，@ 当前方块，: 落点预览，. 空）：");
+        for (const row of grid) lines.push(row.join(""));
         lines.push(`本局动作数=${actionCount}`);
         lines.push(alive()
           ? "【进行中】"
