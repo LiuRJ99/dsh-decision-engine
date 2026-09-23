@@ -290,7 +290,7 @@ describe('stop conditions', () => {
     // controls, not at one hard-coded index: element numbers churn, and a
     // page counter can lag. `interactive` is a list, so `includes` has to work
     // on lists too.
-    let state: unknown = { text: 'q1', interactive: [{ name: 'A', domClassesUntrusted: 'option-item' }] }
+    let state: Record<string, unknown> = { text: 'q1', interactive: [{ name: 'A', domClassesUntrusted: 'option-item' }] }
     const adapter: EnvironmentAdapter = {
       id: 'list-env',
       source: 'custom',
