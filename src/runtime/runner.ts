@@ -89,7 +89,7 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   executeTimeoutMs: 90_000,
   stepDelayMs: 0,
   stateFingerprintChars: 2_000,
-  singleCandidateSteps: 'execute',
+  singleCandidateSteps: 'ask',
 }
 
 /** What one step of the loop produced. */

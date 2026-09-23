@@ -75,7 +75,8 @@ export class LayaDecisionProvider implements DecisionProvider {
         provider: this.id,
         mode: 'choice',
         selected: only.id,
-        ranking: [only.id],
+        ranking: [{ id: only.id }],
+        confidenceKind: 'unavailable',
         latencyMs: Date.now() - started,
       }
     }
