@@ -57,6 +57,10 @@
     "./environments/http": {
       "types": "./lib/types/environments/http/adapter.d.ts",
       "default": "./lib/environments/http/adapter.js"
+    },
+    "./providers/consistency-gate": {
+      "types": "./lib/types/providers/consistency-gate.d.ts",
+      "default": "./lib/providers/consistency-gate.js"
     }
   },
   "files": [

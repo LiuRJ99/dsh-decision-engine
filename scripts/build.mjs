@@ -42,6 +42,7 @@ const ENTRIES = [
   { entry: 'src/environments/http/adapter.ts', outfile: 'lib/environments/http/adapter.js' },
   { entry: 'src/environments/registry.ts', outfile: 'lib/environments/registry.js' },
   { entry: 'src/providers/laya/index.ts', outfile: 'lib/providers/laya/index.js' },
+  { entry: 'src/providers/consistency-gate.ts', outfile: 'lib/providers/consistency-gate.js' },
   { entry: 'src/gate.ts', outfile: 'lib/gate.js' },
   { entry: 'src/skill.ts', outfile: 'lib/skill.js' },
 ]
