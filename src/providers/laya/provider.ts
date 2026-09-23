@@ -69,6 +69,17 @@ export class LayaDecisionProvider implements DecisionProvider {
       throw new DecisionError('invalid_decision', `No question could be planned for mode "${validated.mode}".`, { subject: this.id })
     }
 
+    if (validated.mode === 'choice' && validated.request.candidates.length === 1) {
+      const only = validated.request.candidates[0]!
+      return {
+        provider: this.id,
+        mode: 'choice',
+        selected: only.id,
+        ranking: [only.id],
+        latencyMs: Date.now() - started,
+      }
+    }
+
     const questions: Record<string, { type: 'choice' | 'score' | 'noul'; instructions: string; criteria?: unknown }> = {}
     for (const planned of plan.questions) {
       questions[planned.key] = {
