@@ -367,15 +367,22 @@ export class DecisionRuntime {
     const checkCompletion = async (observation: Observation): Promise<boolean> => {
       // Stage transitions use the planner's explicit predicates. The small
       // model chooses actions; it cannot silently rewrite or skip the plan.
+      let current = observation
       if (plan !== undefined) {
-        while (planIndex < plan.length && completionMatches(observation.state, plan[planIndex]!.completion)) {
+        while (planIndex < plan.length && completionMatches(current.state, plan[planIndex]!.completion)) {
           planIndex++
           planStartedAtStep = steps
+          applyStageScope(plan[planIndex])
+          if (planIndex === plan.length) return true
+          // The previous observation may contain only controls admitted by
+          // the previous stage's scope. Refresh it before deriving actions for
+          // the newly active stage, even when the page itself did not change.
+          current = await observe()
+          assertObservation(current)
+          lastObservation = current
         }
-        applyStageScope(plan[planIndex])
-        if (planIndex === plan.length) return true
       }
-      return isDone(observation)
+      return isDone(current)
     }
     const outcome = (status: RuntimeOutcome['status'], stopReason: string): RuntimeOutcome => ({
       status, environment: adapter.id, steps, stopReason,
@@ -589,16 +596,17 @@ function completionMatches(state: unknown, rule: Objective['completion']): boole
     value = (value as Record<string, unknown>)[key]
   }
   if (rule.includes === undefined) return value === rule.equals
-  // `includes` works on any value: a path often resolves to a list (an
-  // inventory of controls, a set of fields), and "the state at this path
-  // mentions X" is the question a planner actually wants to ask. Stringifying
-  // keeps that expressible without inventing a query language — a per-item
-  // marker such as "the current question has a selected option" is then
-  // `{ path: 'interactive', includes: 'selected' }`.
-  if (typeof value === 'string') return value.includes(rule.includes)
-  try {
-    return JSON.stringify(value)?.includes(rule.includes) === true
-  } catch {
+  // Inspect string values, not serialized object keys: the latter would make
+  // `selected: false` satisfy `includes: "selected"` before any selection.
+  const seen = new WeakSet<object>()
+  const contains = (item: unknown): boolean => {
+    if (typeof item === 'string') return item.includes(rule.includes!)
+    if (item !== null && typeof item === 'object') {
+      if (seen.has(item)) return false
+      seen.add(item)
+      return (Array.isArray(item) ? item : Object.values(item)).some(contains)
+    }
     return false
   }
+  return contains(value)
 }

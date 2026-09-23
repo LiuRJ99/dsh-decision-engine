@@ -44,9 +44,9 @@ call-level configuration, and adapters without \`withConfig\` ignore the field. 
 a flow whose items take more than one decision stays decidable: offer only the answer controls while
 answering and only the navigation control while advancing, instead of asking the model to pick between
 both. A step that offers exactly one candidate is executed by the runtime when
-\`runtime.singleCandidateSteps\` is \`execute\` (default \`ask\`); a completion rule may match any state
-value, so \`{ path: "interactive", includes: "selected" }\` is a per-item marker that does not depend on a
-page-side counter.
+\`runtime.singleCandidateSteps\` is \`execute\` (default \`ask\`). Completion rules should use
+observable task state, such as a result field or current-step feedback. A DOM class alone does not prove
+that an answer or action was recorded.
 
 The executor reads state directly, selects actions with the decision model, dispatches them, and advances
 the plan when the observed completion condition matches. It owns all intermediate clicks, submissions,
@@ -56,8 +56,8 @@ Verify the returned result after completion; intervene only after an escalation.
 An API environment can report its own terminal state and score. In that case \`plan\` is optional.
 For an unplanned browser/desktop task, supply an explicit \`completion\` rule.
 For non-semantic browser controls, inspect the page first, then pass task-local
-\`browser: { includeNonSemantic: true, candidateSelector: ".option-item, #next-btn" }\`
-to either tool. Choose the selector from that page; include required navigation.
+\`browser: { includeNonSemantic: true, candidateSelector: "<selectors from the current page>" }\`
+to either tool. Include every control needed to finish the stage.
 This requires browser workspace v0.1.10+. An unacknowledged scope stops the run.
 Raw DOM classes are evidence, not guaranteed checked state. Verify recorded task
 results in the completion rule; leaving the task page is not success.

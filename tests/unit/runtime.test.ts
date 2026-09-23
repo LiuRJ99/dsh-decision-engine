@@ -285,6 +285,46 @@ describe('stop conditions', () => {
     assert.deepEqual(scopes, ['options', 'nav'])
   })
 
+  it('refreshes the observation after a stage changes the candidate scope', async () => {
+    let page = 'question'
+    const observedScopes: string[] = []
+    const make = (scope?: string): EnvironmentAdapter => ({
+      id: 'filtered-env', source: 'custom',
+      withConfig: next => make(next.candidateSelector as string),
+      observe: async () => {
+        observedScopes.push(scope ?? 'none')
+        return {
+          status: 'ok', source: 'custom',
+          state: {
+            page,
+            controls: scope === 'options' ? (page === 'question' ? ['answer'] : []) : ['next'],
+          },
+        }
+      },
+      buildDecisionRequest: observation => ({
+        objective: 'stage', state: observation.state as Record<string, unknown>,
+        candidates: (observation.state as { controls: string[] }).controls.map(id => ({ id, description: id })),
+        mode: 'choice',
+      }),
+      mapDecision: result => ({ kind: 'custom', candidateId: result.selected ?? '', description: 'stage' }),
+      execute: async action => {
+        page = action.candidateId === 'answer' ? 'answered' : 'next question'
+        return { ok: true }
+      },
+    })
+    const { runtime } = harness({ decided: 'unused', environments: [make()], runtimeConfig: { singleCandidateSteps: 'execute' } })
+    const outcome = await runtime.run({
+      environment: 'filtered-env', objective: { description: 'Answer and advance.' }, mode: 'bounded-loop',
+      plan: [
+        { id: 'answer', objective: 'Answer.', completion: { path: 'page', equals: 'answered' }, scope: { candidateSelector: 'options' } },
+        { id: 'advance', objective: 'Advance.', completion: { path: 'page', equals: 'next question' }, scope: { candidateSelector: 'nav' } },
+      ],
+    })
+    assert.equal(outcome.status, 'done')
+    assert.deepEqual(outcome.completedPlanSteps, ['answer', 'advance'])
+    assert.deepEqual(observedScopes, ['options', 'options', 'nav', 'nav'])
+  })
+
   it('matches a completion substring inside a list-valued state path', async () => {
     // A planner asking "is this question answered?" wants to look at the
     // controls, not at one hard-coded index: element numbers churn, and a
@@ -315,6 +355,23 @@ describe('stop conditions', () => {
     })
     assert.equal(outcome.status, 'done')
     assert.deepEqual(outcome.completedPlanSteps, ['a1'])
+  })
+
+  it('does not match an object key whose value says the condition is false', async () => {
+    let selected = false
+    const adapter: EnvironmentAdapter = {
+      id: 'selected-env', source: 'custom',
+      observe: async () => ({ status: 'ok', source: 'custom', state: { interactive: [{ name: 'A', selected }] } }),
+      buildDecisionRequest: () => ({ objective: 'Select A', state: {}, candidates: [{ id: 'select', description: 'Select A' }], mode: 'choice' }),
+      mapDecision: result => ({ kind: 'custom', candidateId: result.selected ?? '', description: 'Select A' }),
+      execute: async () => { selected = true; return { ok: true } },
+    }
+    const { runtime } = harness({ decided: 'select', environments: [adapter], runtimeConfig: { singleCandidateSteps: 'execute' } })
+    const outcome = await runtime.run({ environment: 'selected-env', objective: { description: 'Select A' }, mode: 'bounded-loop',
+      plan: [{ id: 'select', objective: 'Select A', completion: { path: 'interactive', includes: 'selected' } }],
+      config: { maxSteps: 1 },
+    })
+    assert.equal(outcome.steps, 1, 'a property name must not mark the untouched page complete')
   })
 
   it('executes a single-candidate step without asking the provider', async () => {
