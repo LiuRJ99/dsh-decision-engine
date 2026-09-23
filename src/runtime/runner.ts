@@ -588,5 +588,17 @@ function completionMatches(state: unknown, rule: Objective['completion']): boole
     if (typeof value !== 'object' || value === null || !Object.hasOwn(value, key)) return false
     value = (value as Record<string, unknown>)[key]
   }
-  return rule.includes === undefined ? value === rule.equals : typeof value === 'string' && value.includes(rule.includes)
+  if (rule.includes === undefined) return value === rule.equals
+  // `includes` works on any value: a path often resolves to a list (an
+  // inventory of controls, a set of fields), and "the state at this path
+  // mentions X" is the question a planner actually wants to ask. Stringifying
+  // keeps that expressible without inventing a query language — a per-item
+  // marker such as "the current question has a selected option" is then
+  // `{ path: 'interactive', includes: 'selected' }`.
+  if (typeof value === 'string') return value.includes(rule.includes)
+  try {
+    return JSON.stringify(value)?.includes(rule.includes) === true
+  } catch {
+    return false
+  }
 }

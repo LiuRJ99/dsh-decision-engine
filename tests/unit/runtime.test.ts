@@ -285,6 +285,38 @@ describe('stop conditions', () => {
     assert.deepEqual(scopes, ['options', 'nav'])
   })
 
+  it('matches a completion substring inside a list-valued state path', async () => {
+    // A planner asking "is this question answered?" wants to look at the
+    // controls, not at one hard-coded index: element numbers churn, and a
+    // page counter can lag. `interactive` is a list, so `includes` has to work
+    // on lists too.
+    let state: unknown = { text: 'q1', interactive: [{ name: 'A', domClassesUntrusted: 'option-item' }] }
+    const adapter: EnvironmentAdapter = {
+      id: 'list-env',
+      source: 'custom',
+      observe: async () => ({ status: 'ok', source: 'custom', state }),
+      buildDecisionRequest: () => ({
+        objective: 'answer', state,
+        candidates: [{ id: 'pick', description: 'Pick A' }, { id: 'other', description: 'Pick B' }],
+        mode: 'choice' as const,
+      }),
+      mapDecision: (result) => ({ kind: 'custom', target: result.selected, candidateId: result.selected ?? '', description: 'x' }),
+      execute: async () => {
+        state = { text: 'q1', interactive: [{ name: 'A', domClassesUntrusted: 'option-item selected' }] }
+        return { ok: true, message: 'ok' }
+      },
+    }
+    const { runtime } = harness({ decided: 'pick', environments: [adapter] })
+    const outcome = await runtime.run({
+      environment: 'list-env',
+      objective: { description: 'x' },
+      mode: 'bounded-loop',
+      plan: [{ id: 'a1', objective: 'answer', completion: { path: 'interactive', includes: 'selected' }, maxSteps: 2 }],
+    })
+    assert.equal(outcome.status, 'done')
+    assert.deepEqual(outcome.completedPlanSteps, ['a1'])
+  })
+
   it('executes a single-candidate step without asking the provider', async () => {
     // A stage scope can deliberately leave exactly one control ("advance now").
     // There is nothing to decide, and a small local head cannot answer it at
