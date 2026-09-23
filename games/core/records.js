@@ -1,15 +1,26 @@
 /**
- * 游戏记录层：全部存在浏览器 localStorage（用户要求"浏览器缓存游戏记录"）。
+ * 游戏记录层：浏览器 localStorage。
+ *
+ * 记录归**页面**持有 —— 因为游戏本身就跑在页面里（没有后端）。两点因此成立：
+ *
+ * - 两个游戏现在跑在**同一个 origin**（`games/serve.mjs` 一个端口同时服务它们），
+ *   所以 localStorage 是同一份，一个页面看得到另一个游戏的成绩。
+ *   （之前桥的版本是 :8787 / :8788 两个 origin，各存各的，互相看不见 —— 实测踩到过。）
+ * - 页面开着才记得到；这不再是问题，因为游戏也跑在这里。
  *
  * 结构：{ snake: [record...], tetris: [record...] }
- * record：{ id, game, engine, mode, score, detail, steps, durationMs, at }
- * engine：human | laya | heuristic | router | local（页面本地启发式）
+ * record：{ id, game, engine, mode, strategy, score, detail, difficulty, at }
+ *
+ * 新键是 `dsh-decision-engine.records.v1`；旧键 `laya-router.records.v1` 只读兼容，
+ * 里面可能还有迁移前留下的记录。
  */
-const KEY = "laya-router.records.v1";
+const KEY = "dsh-decision-engine.records.v1";
+const LEGACY_KEY = "laya-router.records.v1";
 const LIMIT_PER_GAME = 300;
 
 export const ENGINE_LABELS = {
   human: "人类",
+  "decision-layer": "决策层",
   laya: "Laya",
   "laya-strategy": "Laya·策略",
   router: "路由器",
@@ -21,15 +32,20 @@ function emptyDb() {
   return { snake: [], tetris: [] };
 }
 
+function normalize(db) {
+  return { snake: db?.snake ?? [], tetris: db?.tetris ?? [] };
+}
+
 export function loadAll() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return emptyDb();
-    const parsed = JSON.parse(raw);
-    return { snake: parsed?.snake ?? [], tetris: parsed?.tetris ?? [] };
-  } catch {
-    return emptyDb();
-  }
+    if (raw) return normalize(JSON.parse(raw));
+  } catch { /* 坏数据当没有 */ }
+  try {
+    const raw = localStorage.getItem(LEGACY_KEY);
+    if (raw) return normalize(JSON.parse(raw));
+  } catch { /* 坏数据当没有 */ }
+  return emptyDb();
 }
 
 function save(db) {
@@ -84,27 +100,17 @@ export function bestByDifficulty(game) {
   return out;
 }
 
+/** 主页两行摘要：共几局、最高分、各引擎分布。 */
 export function summary(game) {
   const list = loadAll()[game] ?? [];
-  const humans = list.filter((r) => r.engine === "human");
-  const machines = list.filter((r) => r.engine !== "human");
-  const avg = (arr) => (arr.length ? Math.round((arr.reduce((s, r) => s + (r.score ?? 0), 0) / arr.length) * 10) / 10 : 0);
-  return {
-    plays: list.length,
-    humanPlays: humans.length,
-    machinePlays: machines.length,
-    best: list.reduce((m, r) => Math.max(m, r.score ?? 0), 0),
-    humanBest: humans.reduce((m, r) => Math.max(m, r.score ?? 0), 0),
-    machineBest: machines.reduce((m, r) => Math.max(m, r.score ?? 0), 0),
-    humanAvg: avg(humans),
-    machineAvg: avg(machines),
-    bestByEngine: bestByEngine(game),
-  };
+  if (list.length === 0) return { total: 0, best: 0, byEngine: {} };
+  const byEngine = bestByEngine(game);
+  return { total: list.length, best: Math.max(...list.map((r) => r.score ?? 0)), byEngine };
 }
 
 /**
- * 会话经验：把最近几局的「主导策略 → 得分」压成一句话，塞进下一局的环境报告。
- * 模型本身没有记忆，靠这句 prompt 里的经验来"影响新的一局"。
+ * 会话经验：把最近几局的「主导策略 → 得分」压成一句话。
+ * 现在没有"下一次决策"可影响（决策层读的是页面文字），保留它是为了在页面上显示。
  */
 export function sessionLesson(game, { limit = 5 } = {}) {
   const list = (loadAll()[game] ?? []).slice(-limit);
@@ -125,7 +131,10 @@ export function sessionLesson(game, { limit = 5 } = {}) {
 }
 
 export function clearAll() {
-  localStorage.removeItem(KEY);
+  try {
+    localStorage.removeItem(KEY);
+    localStorage.removeItem(LEGACY_KEY);
+  } catch { /* 忽略 */ }
 }
 
 export function exportAll() {

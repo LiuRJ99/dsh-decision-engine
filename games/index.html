@@ -9,10 +9,9 @@
   <body>
     <div class="wrap">
       <header class="top">
-        <h1>dsh-decision-engine <small>让决策层在真实页面上玩游戏</small></h1>
+        <h1>dsh-decision-engine <small>游戏跑在页面里，决策层通过浏览器插件接管</small></h1>
         <div class="pill-row">
-          <span id="health" class="badge">检查桥…</span>
-          <a class="badge" href="/health" target="_blank">桥状态（协议接口）</a>
+          <span class="badge">静态页面 · 游戏在页面里跑</span>
         </div>
       </header>
 
@@ -22,8 +21,8 @@
           <p>
             人类用方向键玩。<b>让决策层玩</b>时，每一步它拿到的是<b>局面报告 + 有限候选</b>
             （7×7 局部视野、朝向、食物相对偏移与距离、可达空格数），
-            <b>从四个策略里选一个</b>（追食物 / 保活 / 贴尾巴 / 直走），桥按该策略连走 8 步再问一次；
-            每一步具体怎么走由确定性代码保证。页面只负责把局面画出来、把动作发回桥。
+            <b>从四个策略里选一个</b>（追食物 / 保活 / 贴尾巴 / 直走），页面按该策略连走 8 步再问一次；
+            每一步具体怎么走由 game core 里的确定性代码保证。
           </p>
           <div class="pill-row">
             <span class="badge">策略四选一</span>
@@ -107,16 +106,16 @@
       <div class="card">
         <h2>页面上的模式</h2>
         <div class="kv">
-          <span>人类</span><span>键盘操作；动作经 <code>POST /action</code> 交给桥执行，记录同样进榜。</span>
+          <span>人类</span><span>键盘操作，游戏就在页面里跑，记录进 localStorage。</span>
           <span>本地启发式自动</span><span>纯本地规则，页面自己发落点，<b>不经过决策层</b>：贪吃蛇 = 洪水填充保活 + 贪心靠近食物；方块 = Dellacherie 评分（业界经典权重）。用来对照和离线查看。</span>
-          <span>决策层驱动</span><span><b>真正的玩法</b>：主 Agent 调 <code>decision_run</code> 把 <code>endpoint</code> 指向桥。桥持有权威局面，每次把<b>结构化局面 + 四个策略候选</b>交给决策模型，模型选一个策略，桥按该策略执行（蛇连走 8 步 / 方块算一个落点），然后再问一次。页面不参与决策，只渲染。</span>
+          <span>决策层接管</span><span><b>真正的玩法</b>：主 Agent 调 <code>decision_run</code>，环境选 <b>browser</b>。浏览器插件读游戏页上的「决策层可读局面」文字，再点页面上的四个策略按钮 —— 点一次，页面按该策略连走 8 步（蛇）或算一个落点（方块）。<b>没有后端</b>，游戏和动作都在页面里。</span>
         </div>
         <div class="note">
           实测（本机，同一种子）：<b>决策粒度决定成绩</b>。
           让模型逐步选方向/落点 → 贪吃蛇 16 步 0 分就撞死、方块 600 分消 5 行就顶死；
           让它只选策略、本地算走法 → 贪吃蛇 <b>12 分 / 166 步 / 长度 15</b>、
           方块 <b>55400 分 / 消 95 行 / 200 块没死</b>。
-          这是 System-1 决策模型：擅长"从有限选项里选一个"，不擅长逐步决策，所以桥固定用策略粒度。
+          这是 System-1 决策模型：擅长"从有限选项里选一个"，不擅长逐步决策，所以页面只暴露策略粒度。
           页面上的「最近一次落子」会显示它选了四个策略里的第几个，可以自己看。
         </div>
       </div>
@@ -126,18 +125,6 @@
       import { bestByDifficulty, clearAll, exportAll, loadAll } from "/js/records.js";
       import { renderRecords, renderSummaryLine } from "/js/ui.js";
 
-      // 桥状态：直接问 /health（原来的 /api/health 是 laya-router 服务端的，已经不存在）
-      (async () => {
-        const el = document.getElementById("health");
-        try {
-          const h = await (await fetch("/health", { cache: "no-store" })).json();
-          el.textContent = `桥已连接 · ${h.game} · rev ${h.revision}${h.done ? " · 已结束" : ""}`;
-          el.style.color = "#4ade80";
-        } catch {
-          el.textContent = "桥不可达";
-          el.style.color = "#f87171";
-        }
-      })();
       for (const game of ["snake", "tetris"]) {
         renderSummaryLine(document.getElementById(`${game}-summary`), game);
         renderRecords(document.getElementById(`${game}-best`), game, { limit: 6 });
@@ -166,7 +153,7 @@
       });
 
       document.getElementById("clear").addEventListener("click", () => {
-        if (confirm("确定清空浏览器里的全部游戏记录？")) {
+        if (confirm("确定清空全部游戏记录？（存在浏览器 localStorage 里）")) {
           clearAll();
           location.reload();
         }

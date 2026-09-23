@@ -88,7 +88,7 @@ export function renderRecords(el, game, { limit = 8, recent = false } = {}) {
   if (!el) return;
   const rows = recent ? recentRecords(game, limit) : listRecords(game).slice(0, limit);
   if (rows.length === 0) {
-    el.innerHTML = `<div class="muted">还没有记录 —— 玩一局就会写进浏览器 localStorage。</div>`;
+    el.innerHTML = `<div class="muted">还没有记录 —— 玩一局就会写进浏览器 localStorage（游戏就在页面里跑）。</div>`;
     return;
   }
   el.innerHTML = `<div class="records">${rows

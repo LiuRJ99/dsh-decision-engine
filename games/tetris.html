@@ -8,16 +8,22 @@
     <style>
       .rank-list { margin: 6px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.7; }
       .rank-list .chosen { color: #7dd3fc; font-weight: 600; }
+      /* 被接管面 */
+      .takeover { margin: 12px 0 4px; padding: 10px 12px; border: 1px solid #2a3340; border-radius: 8px; background: #12161d; }
+      .takeover-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #93c5fd; margin-bottom: 6px; }
+      #model-state { margin: 0; white-space: pre-wrap; font-size: 12px; line-height: 1.45; color: #cbd5e1; }
+      .strategy-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+      .strategy-bar button { flex: 1 1 190px; text-align: left; padding: 8px 10px; font-size: 12px; line-height: 1.4; }
+      .strategy-bar button[disabled] { opacity: .45; }
     </style>
   </head>
   <body>
     <div class="wrap">
       <header class="top">
-        <h1>🧱 俄罗斯方块 <small>局面由桥持有；决策层选策略，本地按策略算落点</small></h1>
+        <h1>🧱 俄罗斯方块 <small>游戏跑在这个页面里；决策层通过浏览器插件接管它</small></h1>
         <div class="pill-row">
           <a class="badge" href="/">← 大厅</a>
           <a class="badge" href="/snake.html">🐍 贪吃蛇</a>
-          <span id="health" class="badge">检查桥…</span>
         </div>
       </header>
 
@@ -35,10 +41,26 @@
                   <span>等级</span><span class="mono" id="level">1</span>
                   <span>方块数</span><span class="mono" id="pieces">0</span>
                   <span>用时</span><span class="mono" id="time">0s</span>
-                  <span>落子间隔</span><span class="mono" id="latency">-</span>
+                  <span>当前策略</span><span class="mono" id="latency">-</span>
                 </div>
               </div>
             </div>
+
+            <!--
+              被接管面。决策层通过浏览器插件读这段文字、点这排按钮：
+                · 状态必须是**页面文字**（快照正文即模型输入）
+                · 动作必须是**有 role 的可点元素**（画布和键盘它看不见）
+              接管模式下人类控件收起，候选集就只剩这四个策略按钮。
+            -->
+            <div class="takeover">
+              <div class="takeover-head">
+                <span>决策层可读局面</span>
+                <span class="muted" id="takeover-hint">（浏览器插件读这段文字，点下面的策略按钮）</span>
+              </div>
+              <pre id="model-state" class="mono">准备中…</pre>
+              <div class="strategy-bar" id="strategy-buttons"></div>
+            </div>
+
             <div class="toolbar">
               <button id="play" class="primary">开始</button>
               <button id="reset">重来</button>
@@ -55,17 +77,13 @@
               </select>
             </div>
             <div class="note">
-              <b>这个页面不持状态。</b>权威盘面在桥进程里（<code>/state</code>、<code>/action</code>），
-              页面只做两件事：把盘面画出来、把你的输入发回去。
-              <br />
-              · <b>人类</b>：← → 移动、↑ 旋转、↓ 软降、空格落子、P 暂停。
-              因为落子是由桥原子执行的，前四个键改的是<b>本地预览的落点</b>（半透明预览会跟着动），
-              空格才真正把方块放下去。
-              · <b>本地启发式自动落</b>：页面用本地规则自己发落点，不为决策层服务，只是方便你看。
-              · <b>让决策层玩</b>：不要开上面两个，由主 Agent 调 <code>decision_run</code> 指向这个桥。
-              决策层每次只做一个决定 —— <b>为当前方块从四个策略里选一个</b>（消行 / 补洞 / 平整 / 压低），
-              具体放到哪一列由本地算法按该策略算。这样它做的是自己擅长的"四选一"。
-              <br />
+              <b>游戏就跑在这个页面里。</b>盘面、方块、消行规则全在这页的 JS 里（<code>/js/tetris-core.js</code>），
+              没有任何后端。<br />
+              · <b>人类</b>：← → 移动、↑ 旋转、↓ 软降、空格硬降、P 暂停。
+              · <b>本地启发式自动落</b>：页面自己用本地规则落，只是方便你看。
+              · <b>让决策层接管</b>：主 Agent 调 <code>decision_run</code> 指向这个页面（浏览器环境）。
+              它会读上面那段局面文字、点下面四个策略按钮中的一个；点一次，页面按该策略算一个落点放下去。
+              页面地址加 <code>?takeover=1</code> 会收起人类控件，让候选集只剩这四个按钮。<br />
               消一行 +100，顶到天花板 −1000。
             </div>
           </div>
@@ -74,14 +92,13 @@
         <div class="panels">
           <div class="panel-col">
           <div class="card">
-            <h2>盘面与桥</h2>
+            <h2>局面</h2>
             <div class="kv">
               <span>难度</span><span id="difficulty-label">-</span>
               <span>随机种子</span><span class="mono" id="seed-label">-</span>
-              <span>桥地址</span><span class="mono" id="bridge-label">-</span>
               <span>当前方块</span><span id="piece-info">-</span>
               <span>合法落点</span><span class="mono" id="mix">0</span>
-              <span>决策粒度</span><span class="mono" id="granularity">-</span>
+              <span>本局动作数</span><span class="mono" id="pieces-act">0</span>
               <span>状态</span><span id="mode-label">等待输入</span>
             </div>
           </div>
@@ -102,17 +119,16 @@
 
           <div class="panel-col">
           <div class="card">
-            <h2>最近一次落子</h2>
-            <div id="decision-action" class="mono">还没有落子</div>
-            <div class="note">决策层收到的是下面这份候选集（合法落点按"少空洞、堆得低"排序后的前若干个），它从中选一个 id 返回。描述里是真实落点事实。</div>
+            <h2>最近一次策略</h2>
+            <div id="decision-action" class="mono">还没有选过策略</div>
+            <div class="note">下面就是决策层在按钮上看到的四份说明 —— 它从中挑一个，页面按该策略算落点并放下去。</div>
             <ol class="rank-list" id="decision-bars"></ol>
             <div class="kv" style="margin-top: 10px">
-              <span>选中项排名</span><span id="decision-top">-</span>
-              <span>落子间隔</span><span id="decision-latency">-</span>
+              <span>落点</span><span id="decision-top">-</span>
+              <span>耗时</span><span id="decision-latency">-</span>
               <span>候选数</span><span id="decision-noul">-</span>
-              <span>本地预览落点</span><span id="decision-fallback">-</span>
+              <span>盘面摘要</span><span id="decision-situation">-</span>
             </div>
-            <div class="note" id="decision-situation"></div>
           </div>
 
           <div class="card">
@@ -129,19 +145,23 @@
     </div>
 
     <script type="module">
-      // 游戏规则是本地模块（与桥共用同一份 core/，所以纯函数不会漂移）
+      // 游戏规则是本地模块：浏览器里跑，没有任何后端
       import {
         PIECE_COLORS, PIECES, tetrisCells, tetrisCollides, tetrisDropY,
-        tetrisHeuristicPlacement, tetrisLegalPlacements,
+        createTetrisState, tetrisApplyPlacement, tetrisLegalPlacements,
+        tetrisHeuristicPlacement, tetrisStrategyPlacement, tetrisStrategyCriteria,
+        tetrisLayaState, TETRIS_STRATEGIES, TETRIS_DIFFICULTIES,
+        tetrisMove, tetrisRotate, tetrisStepDown, tetrisHardDrop,
       } from "/js/tetris-core.js";
       import { addRecord, sessionLesson } from "/js/records.js";
       import { renderRecords as renderRecordsList } from "/js/ui.js";
-      import { sessionLessonZh, zhCause, zhPlacement, zhTetrisSituation } from "/js/zh.js";
+      import { sessionLessonZh, zhCause, zhStrategy } from "/js/zh.js";
 
       // ------------------------------------------------------------------ 配置
       const params = new URLSearchParams(location.search);
-      const BRIDGE = params.get("bridge") ?? location.origin;
-      const POLL_MS = Number(params.get("poll") ?? 150);
+      const TAKEOVER = params.get("takeover") === "1";
+      /** 每放一块之间的节拍 —— 看得见方块一块块落下。 */
+      const STEP_MS = Number(params.get("pace") ?? 160);
       const CELL = 30;
 
       // ------------------------------------------------------------------ 元素
@@ -156,25 +176,23 @@
         pieces: document.getElementById("pieces"),
         time: document.getElementById("time"),
         latency: document.getElementById("latency"),
-        layout: document.getElementById("layout"),
-        toggleBoard: document.getElementById("toggle-board"),
         play: document.getElementById("play"),
         reset: document.getElementById("reset"),
+        toggleBoard: document.getElementById("toggle-board"),
         difficulty: document.getElementById("difficulty"),
         difficultyLabel: document.getElementById("difficulty-label"),
         seedLabel: document.getElementById("seed-label"),
-        bridgeLabel: document.getElementById("bridge-label"),
         pieceInfo: document.getElementById("piece-info"),
         modeLabel: document.getElementById("mode-label"),
-        granularity: document.getElementById("granularity"),
         mix: document.getElementById("mix"),
-        health: document.getElementById("health"),
+        piecesAct: document.getElementById("pieces-act"),
+        modelState: document.getElementById("model-state"),
+        strategyButtons: document.getElementById("strategy-buttons"),
         action: document.getElementById("decision-action"),
         bars: document.getElementById("decision-bars"),
-        noul: document.getElementById("decision-noul"),
-        decisionLatency: document.getElementById("decision-latency"),
         top: document.getElementById("decision-top"),
-        fallback: document.getElementById("decision-fallback"),
+        decisionLatency: document.getElementById("decision-latency"),
+        noul: document.getElementById("decision-noul"),
         situation: document.getElementById("decision-situation"),
         rewardTotal: document.getElementById("reward-total"),
         rewardLines: document.getElementById("reward-lines"),
@@ -187,102 +205,137 @@
         recentToggle: document.getElementById("recent-toggle"),
       };
 
-      // ------------------------------------------------------------------ 状态
-      let view = null;             // 最近一次从桥读到的画面
+      // ------------------------------------------------------------------ 局面（全部在页面里）
+      let state = null;
+      let seed = Number(params.get("seed") ?? Math.floor(Math.random() * 1e6));
       let opMode = "human";        // human | auto
       let paused = false;
-      let autoBusy = false;
-      let pending = null;          // 本地预览落点 { rot, x }，空格才真正落子
-      let pendingForRevision = -1; // 预览属于哪个局面版本（换方块就重算）
-      let showRecent = false;
-      let actionInFlight = false;  // 一次动作在飞时不再发第二个（防重复提交）
+      let actionCount = 0;
       let startedAt = Date.now();
-      let recordedRevision = -1;
+      let elapsedMs = 0;
+      let timer = null;
+      let playTimer = null;
+      let lastStrategy = null;
+      let lastPlayed = null;
+      let showRecent = false;
+      let recorded = false;
       let sessionExperience = null;
+
+      const alive = () => state.alive !== false;
       const pieceName = (p) => (p == null ? "?" : typeof p === "string" ? p : (p.type ?? "?"));
 
-      // ------------------------------------------------------------------ 与桥通信
-      async function bridgeFetch(path, init) {
-        const res = await fetch(BRIDGE + path, { cache: "no-store", ...(init ?? {}) });
-        if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
-        return await res.json();
-      }
-
-      async function postAction(candidateId) {
-        const snap = await bridgeFetch("/state");
-        return await bridgeFetch("/action", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            protocol: "dsh-environment/v1",
-            actionId: `page-${Date.now()}`,
-            environmentId: snap.environmentId,
-            episodeId: snap.episodeId,
-            revision: snap.revision,
-            candidateId,
-          }),
-        });
-      }
-
-      async function resetEpisode() {
-        await bridgeFetch("/reset", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ difficulty: els.difficulty.value }),
-        });
-        pending = null;
-        pendingForRevision = -1;
-        recordedRevision = -1;
+      function newGame() {
+        clearTimeout(timer); clearTimeout(playTimer);
+        timer = null; playTimer = null;
+        seed = Math.floor(Math.random() * 1e6);
+        state = createTetrisState({ seed, difficulty: els.difficulty.value });
+        actionCount = 0;
         startedAt = Date.now();
+        elapsedMs = 0;
+        lastStrategy = null;
+        lastPlayed = null;
+        recorded = false;
+        paused = false;
+        renderAll();
       }
 
-      // ------------------------------------------------------------------ 落点预览
+      function finish() {
+        if (recorded) return;
+        recorded = true;
+        clearTimeout(timer); clearTimeout(playTimer);
+        timer = null; playTimer = null;
+        addRecord("tetris", {
+          game: "tetris",
+          engine: "human",
+          mode: lastStrategy ? "strategy" : opMode,
+          strategy: lastStrategy,
+          score: state.score,
+          difficulty: els.difficulty.value,
+          detail: `${state.lines} 行 / ${state.pieces} 块 / ${zhCause(state.cause)}`,
+        });
+        sessionExperience = sessionLesson("tetris");
+        els.experience.textContent = sessionExperience ? sessionLessonZh("tetris") : "";
+        renderRecords();
+        renderAll();
+      }
+
       /**
-       * 合法落点可能不含玩家想去的列（贴边、被堆叠挡住），所以取"最近的合法列"。
-       * 旋转同理：某个旋转可能在这个列放不下，就退回当前旋转。
+       * 放一个方块（"点一次策略按钮"做的事）。
+       *
+       * **状态立刻结算，不留"正在落子"的窗口。** 这是实测踩出来的：如果这里 setTimeout
+       * 延迟结算，决策层正好在那个窗口里观察，会看到四个按钮全被禁用（候选集为空），
+       * Laya 直接报 `TopK: k argument [2] should not be greater than axis dim value [1]`
+       * 整局挂掉。所以：先算完、先渲染，再考虑动画 —— 动画绝不能挡住观察。
        */
-      function clampToLegal(raw, placements) {
-        if (placements.length === 0) return null;
-        const sameRot = placements.filter((p) => p.rot === raw.rot);
-        const pool = sameRot.length > 0 ? sameRot : placements;
-        let best = pool[0];
-        for (const p of pool) {
-          if (Math.abs(p.x - raw.x) < Math.abs(best.x - raw.x)) best = p;
+      function playStrategy(strategy) {
+        if (!alive()) return;
+        lastStrategy = strategy;
+        actionCount += 1;
+        const t0 = Date.now();
+        const placement = tetrisStrategyPlacement(state, strategy);
+        if (!placement) return;
+        const ev = tetrisApplyPlacement(state, placement);
+        lastPlayed = { strategy, placement, cleared: ev?.cleared ?? 0, ms: Date.now() - t0 };
+        renderAll();
+        if (!alive()) finish();
+      }
+
+      /** 本地启发式落一块（自动模式用）。 */
+      function autoDrop() {
+        const best = tetrisHeuristicPlacement(state);
+        if (!best?.placement) return;
+        actionCount += 1;
+        tetrisApplyPlacement(state, best.placement);
+        renderAll();
+        if (!alive()) finish();
+      }
+
+      // ------------------------------------------------------------------ 被接管面
+      /**
+       * 把盘面摊成页面文字、把四个策略立成真按钮。
+       * 按钮文字用 core 的 `tetrisStrategyCriteria()`，与喂给模型的口径同源。
+       *
+       * 堆叠**只画底部 12 行**：Laya 的窗口只有 512 token，页面文字太长会把候选清单
+       * 挤出上下文（实测：画满 20 行 → 模型看不到候选，跑去点别的按钮）。
+       * core 的 `tetrisLayaState` 也是取 12 行，这里跟它对齐。
+       */
+      function renderTakeover() {
+        const s = tetrisLayaState(state);
+        const lines = [];
+        lines.push(`棋盘 ${state.w}x${state.h}`);
+        lines.push(`分数=${s.lines_cleared === undefined ? state.score : state.score} 消行=${state.lines} 等级=${state.level} 已放=${state.pieces}`);
+        lines.push(`当前块=${s.current_piece ?? "无"} 旋转态=${s.current_rotation ?? "-"} 下一块=${s.next_piece ?? "?"}`);
+        lines.push(`各列高度=[${s.column_heights.join(",")}] 空洞=${s.holes}`);
+        lines.push(`堆叠（自第 ${state.h - s.stack.length + 1} 行起，. 为空，字母为已固定方块，G 为垃圾行）：`);
+        for (const row of s.stack) lines.push(row);
+        lines.push(`本局动作数=${actionCount}`);
+        lines.push(alive()
+          ? "【进行中】"
+          : `【本局结束】${JSON.stringify({ score: state.score, lines: state.lines, pieces: state.pieces, cause: state.cause ?? null })}`);
+        els.modelState.textContent = lines.join("\n");
+
+        const criteria = tetrisStrategyCriteria(state);
+        // 按钮只建一次，之后只改文字和禁用态 —— 绝不重建节点。
+        // 决策层"先快照、再推理、后点击"，推理期间页面还会渲染；节点被换掉后
+        // 桥手里的旧节点就是 detached 的，点它不产生 click 事件，连续几次会被
+        // no_progress 守卫停掉。节点身份稳定，这一整类丢点击就不存在了。
+        if (els.strategyButtons.childElementCount !== TETRIS_STRATEGIES.length) {
+          els.strategyButtons.innerHTML = "";
+          for (const strategy of TETRIS_STRATEGIES) {
+            const b = document.createElement("button");
+            b.dataset.strategy = strategy;
+            b.addEventListener("click", () => playStrategy(strategy));
+            els.strategyButtons.appendChild(b);
+          }
         }
-        return { rot: best.rot, x: best.x };
-      }
-
-      /** 新方块出现时，把预览放到"看着合理"的初始位置：尽量保持上一列的相对位置。 */
-      function initPending(v) {
-        const placements = v.placements ?? [];
-        if (placements.length === 0) { pending = null; return; }
-        const piece = v.raw.piece;
-        const raw = { rot: piece?.rot ?? 0, x: piece?.x ?? Math.floor(v.raw.w / 2) };
-        pending = clampToLegal(raw, placements);
-        pendingForRevision = v.revision;
-      }
-
-      function nudge(dx, dRot) {
-        if (!view || view.done) return;
-        const placements = view.placements ?? [];
-        if (placements.length === 0) return;
-        const base = pending ?? clampToLegal({ rot: 0, x: Math.floor(view.raw.w / 2) }, placements);
-        if (base === null) return;
-        const raw = { rot: (((base.rot + dRot) % 4) + 4) % 4, x: base.x + dx };
-        pending = clampToLegal(raw, placements);
-      }
-
-      async function commitPending() {
-        if (!view || view.done || pending === null || actionInFlight) return;
-        actionInFlight = true;
-        try {
-          await postAction(`drop:${pending.rot},${pending.x}`);
-        } catch { /* 下一帧会同步 */ } finally {
-          actionInFlight = false;
+        for (const b of els.strategyButtons.querySelectorAll("button")) {
+          b.textContent = `strategy:${b.dataset.strategy} — ${criteria[b.dataset.strategy] ?? b.dataset.strategy}`;
+          // 只按"这局还活着吗"禁用 —— 绝不因为"正在执行"禁用（见 playStrategy 的注释）
+          b.disabled = !alive();
         }
       }
 
-      // ------------------------------------------------------------------ 绘制
+      // ------------------------------------------------------------------ 绘制与面板
       function drawCell(g, x, y, color, size = CELL) {
         g.fillStyle = color;
         g.fillRect(x * size + 1, y * size + 1, size - 2, size - 2);
@@ -290,65 +343,50 @@
         g.fillRect(x * size + 1, y * size + 1, size - 2, 3);
       }
 
-      function render(v) {
-        const raw = v.raw;
+      function draw() {
         ctx.fillStyle = "#0b0d12";
         ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
         ctx.strokeStyle = "rgba(255,255,255,0.05)";
-        for (let x = 1; x < raw.w; x++) {
-          ctx.beginPath(); ctx.moveTo(x * CELL, 0); ctx.lineTo(x * CELL, boardCanvas.height); ctx.stroke();
-        }
-        for (let y = 1; y < raw.h; y++) {
-          ctx.beginPath(); ctx.moveTo(0, y * CELL); ctx.lineTo(boardCanvas.width, y * CELL); ctx.stroke();
-        }
-        for (let y = 0; y < raw.h; y++) {
-          for (let x = 0; x < raw.w; x++) {
-            const cell = raw.board[y][x];
-            if (cell !== 0 && cell != null) drawCell(ctx, x, y, PIECE_COLORS[String(cell)[0]] ?? "#888");
+        for (let x = 1; x < state.w; x++) { ctx.beginPath(); ctx.moveTo(x * CELL, 0); ctx.lineTo(x * CELL, boardCanvas.height); ctx.stroke(); }
+        for (let y = 1; y < state.h; y++) { ctx.beginPath(); ctx.moveTo(0, y * CELL); ctx.lineTo(boardCanvas.width, y * CELL); ctx.stroke(); }
+        for (let y = 0; y < state.h; y++) {
+          for (let x = 0; x < state.w; x++) {
+            const v = state.board[y][x];
+            if (v !== 0 && v != null) drawCell(ctx, x, y, PIECE_COLORS[String(v)[0]] ?? "#888");
           }
         }
-        // 当前方块：默认画它在盘面上的真实位置（由桥带着下落）
-        if (raw.piece && raw.alive) {
-          for (const c of tetrisCells(raw.piece.type, raw.piece.rot, raw.piece.x, raw.piece.y)) {
-            if (c.y >= 0) drawCell(ctx, c.x, c.y, PIECE_COLORS[raw.piece.type]);
+        if (state.piece && alive()) {
+          for (const c of tetrisCells(state.piece.type, state.piece.rot, state.piece.x, state.piece.y)) {
+            if (c.y >= 0) drawCell(ctx, c.x, c.y, PIECE_COLORS[state.piece.type]);
           }
-        }
-        // 落点预览：本地 pending 优先（人类按键时跟着动），否则用方块自身的落点
-        const ghost = pending ?? (raw.piece ? { rot: raw.piece.rot, x: raw.piece.x } : null);
-        if (ghost && raw.piece && raw.alive) {
-          const gy = tetrisDropY(raw, raw.piece.type, ghost.rot, ghost.x);
+          // 落点预览
+          const gy = tetrisDropY(state, state.piece.type, state.piece.rot, state.piece.x);
           if (gy !== null) {
-            const cells = tetrisCells(raw.piece.type, ghost.rot, ghost.x, gy);
+            const cells = tetrisCells(state.piece.type, state.piece.rot, state.piece.x, gy);
             ctx.save();
-            ctx.globalAlpha = 0.3;
+            ctx.globalAlpha = 0.28;
             for (const c of cells) {
-              if (c.y >= 0 && c.y < raw.h && c.x >= 0 && c.x < raw.w) {
-                ctx.fillStyle = PIECE_COLORS[raw.piece.type] ?? "#fff";
+              if (c.y >= 0 && c.y < state.h && c.x >= 0 && c.x < state.w) {
+                ctx.fillStyle = PIECE_COLORS[state.piece.type] ?? "#fff";
                 ctx.fillRect(c.x * CELL + 1, c.y * CELL + 1, CELL - 2, CELL - 2);
               }
             }
             ctx.restore();
-            ctx.strokeStyle = "#4dd0e1";
-            ctx.lineWidth = 2;
-            for (const c of cells) {
-              if (c.y >= 0 && c.y < raw.h && c.x >= 0 && c.x < raw.w) ctx.strokeRect(c.x * CELL + 1, c.y * CELL + 1, CELL - 2, CELL - 2);
-            }
           }
         }
-        if (!raw.alive) {
+        if (!alive()) {
           ctx.fillStyle = "rgba(0,0,0,0.6)";
           ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
           ctx.fillStyle = "#e6e9ef";
           ctx.font = "600 20px -apple-system, sans-serif";
           ctx.textAlign = "center";
-          ctx.fillText(`结束：${zhCause(raw.cause)}`, boardCanvas.width / 2, boardCanvas.height / 2 - 14);
-          ctx.fillText(`${raw.score} 分 / ${raw.lines} 行`, boardCanvas.width / 2, boardCanvas.height / 2 + 16);
+          ctx.fillText(`结束：${zhCause(state.cause)}`, boardCanvas.width / 2, boardCanvas.height / 2 - 14);
+          ctx.fillText(`${state.score} 分 / ${state.lines} 行`, boardCanvas.width / 2, boardCanvas.height / 2 + 16);
         }
 
-        // 下一块
         nctx.fillStyle = "#0b0d12";
         nctx.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
-        const nt = pieceName(raw.next);
+        const nt = pieceName(state.next);
         if (nt !== "?" && PIECES[nt]) {
           const shape = PIECES[nt][0];
           const size = 24;
@@ -360,31 +398,48 @@
         }
       }
 
-      // ------------------------------------------------------------------ 面板
-      function renderLatestMove(v) {
-        const m = v.lastMove;
-        if (!m) {
-          els.action.textContent = "还没有落子";
+      function renderPanels() {
+        els.score.textContent = state.score;
+        els.lines.textContent = state.lines;
+        els.level.textContent = state.level;
+        els.pieces.textContent = state.pieces;
+        els.time.textContent = `${Math.floor((elapsedMs || Date.now() - startedAt) / 1000)}s`;
+        els.latency.textContent = lastStrategy ? zhStrategy(lastStrategy) : "-";
+        els.pieceInfo.textContent = state.piece ? `${state.piece.type}（旋转 ${state.piece.rot}）→ 下一块 ${pieceName(state.next)}` : "-";
+        els.mix.textContent = String(tetrisLegalPlacements(state).length);
+        els.piecesAct.textContent = actionCount;
+        els.difficultyLabel.textContent = TETRIS_DIFFICULTIES[state.difficulty]?.label ?? state.difficulty;
+        els.seedLabel.textContent = seed;
+        els.modeLabel.textContent = !alive() ? "已结束" : opMode === "auto" ? "本地自动" : "等待输入";
+        els.play.textContent = !alive() ? "再来一局" : paused ? "继续" : "暂停";
+
+        const topout = alive() ? 0 : -1000;
+        els.rewardTotal.textContent = state.lines * 100 + topout;
+        els.rewardLines.textContent = state.lines * 100;
+        els.rewardPieces.textContent = state.pieces;
+        els.rewardRate.textContent = state.pieces > 0 ? (state.lines / state.pieces).toFixed(2) : "0";
+        els.rewardTopout.textContent = topout;
+
+        const criteria = tetrisStrategyCriteria(state);
+        if (lastStrategy === null) {
+          els.action.textContent = "还没有选过策略";
           els.bars.innerHTML = "";
-          els.top.textContent = "-"; els.decisionLatency.textContent = "-";
-          els.noul.textContent = "-"; els.fallback.textContent = "-";
-          els.situation.textContent = "";
-          return;
+        } else {
+          els.action.textContent = `选了 strategy:${lastStrategy}`;
+          els.bars.innerHTML = "";
+          for (const s of TETRIS_STRATEGIES) {
+            const li = document.createElement("li");
+            const chosen = s === lastStrategy;
+            if (chosen) li.className = "chosen";
+            li.textContent = `strategy:${s} — ${criteria[s] ?? s}${chosen ? "　★ 选中" : ""}`;
+            els.bars.appendChild(li);
+          }
         }
-        els.action.textContent = `选中 ${m.candidateId}`;
-        els.bars.innerHTML = "";
-        for (const c of m.offered) {
-          const li = document.createElement("li");
-          const chosen = c.id === m.candidateId;
-          if (chosen) li.className = "chosen";
-          li.textContent = `${c.id} — ${c.description}${chosen ? "　★ 选中" : ""}`;
-          els.bars.appendChild(li);
-        }
-        els.top.textContent = m.rankIndex >= 0 ? `第 ${m.rankIndex + 1} / ${m.offered.length}` : "-";
-        els.decisionLatency.textContent = v.lastGapMs != null ? `${v.lastGapMs}ms` : "-";
-        els.noul.textContent = String(m.offered.length);
-        els.fallback.textContent = pending ? `第 ${pending.x + 1} 列 · 旋转 ${pending.rot}` : "-";
-        els.situation.textContent = zhTetrisSituation?.(v.raw) ?? "";
+        els.top.textContent = lastPlayed ? `旋转 ${lastPlayed.placement.rot} · 第 ${lastPlayed.placement.x} 列 · 消 ${lastPlayed.cleared} 行` : "-";
+        els.decisionLatency.textContent = lastPlayed ? `${lastPlayed.ms}ms` : "-";
+        els.noul.textContent = String(TETRIS_STRATEGIES.length);
+        const s = tetrisLayaState(state);
+        els.situation.textContent = `最高列 ${Math.max(...s.column_heights)} 行 · 空洞 ${s.holes} 个`;
       }
 
       function renderRecords() {
@@ -392,129 +447,78 @@
         els.recordsNote.textContent = showRecent ? "显示最近 8 局" : "显示最高分（按分数排序）";
       }
 
-      function recordIfFinished(v) {
-        if (!v.done || v.revision === recordedRevision) return;
-        recordedRevision = v.revision;
-        const r = v.result ?? {};
-        addRecord("tetris", {
-          game: "tetris",
-          engine: "decision-layer",
-          mode: opMode,
-          strategy: null,
-          score: r.score ?? 0,
-          difficulty: v.difficulty,
-          detail: `${r.lines ?? 0} 行 / ${r.pieces ?? 0} 块 / ${zhCause(r.cause)}`,
-        });
-        sessionExperience = sessionLesson("tetris");
-        els.experience.textContent = sessionExperience ? sessionLessonZh("tetris") : "";
-        renderRecords();
+      function applyTakeoverLayout() {
+        const inGame = TAKEOVER || (alive() && actionCount > 0);
+        for (const a of document.querySelectorAll("header.top a, header.top .badge")) a.style.display = inGame ? "none" : "";
+        for (const t of document.querySelectorAll(".toolbar")) t.style.display = TAKEOVER ? "none" : "";
       }
 
-      function paint(v) {
-        // 换方块/换局面就重算预览基准
-        if (v.revision !== pendingForRevision) initPending(v);
-        render(v);
-
-        const raw = v.raw;
-        els.score.textContent = raw.score;
-        els.lines.textContent = raw.lines;
-        els.level.textContent = raw.level ?? 1;
-        els.pieces.textContent = raw.pieces;
-        els.time.textContent = `${Math.floor((Date.now() - startedAt) / 1000)}s`;
-        els.latency.textContent = v.lastGapMs != null ? `${v.lastGapMs}ms` : "-";
-        els.pieceInfo.textContent = raw.piece ? `${raw.piece.type}（旋转 ${raw.piece.rot}）→ 下一块 ${pieceName(raw.next)}` : "-";
-        els.mix.textContent = String((v.placements ?? []).length);
-        els.granularity.textContent = v.granularity ?? "-";
-        els.difficultyLabel.textContent = v.difficulty;
-        els.seedLabel.textContent = v.seed;
-        els.modeLabel.textContent = v.done ? "已结束" : opMode === "auto" ? "本地自动" : "等待输入";
-        els.play.textContent = v.done ? "再来一局" : paused ? "继续" : v.decisions > 0 ? "暂停" : "开始";
-
-        const rw = v.reward ?? { total: 0, lines: 0, pieces: 0, rate: 0, topout: 0 };
-        els.rewardTotal.textContent = rw.total;
-        els.rewardLines.textContent = rw.lines;
-        els.rewardPieces.textContent = rw.pieces;
-        els.rewardRate.textContent = (rw.rate ?? 0).toFixed(2);
-        els.rewardTopout.textContent = rw.topout;
-
-        renderLatestMove(v);
-        recordIfFinished(v);
+      function renderAll() {
+        draw();
+        renderTakeover();
+        renderPanels();
+        applyTakeoverLayout();
       }
 
-      async function poll() {
-        try {
-          const v = await bridgeFetch("/render");
-          view = v;
-          els.health.textContent = "桥已连接";
-          els.health.style.color = "#4ade80";
-          paint(v);
-        } catch {
-          els.health.textContent = "桥不可达";
-          els.health.style.color = "#f87171";
-        }
-      }
-
-      /** 本地自动模式：页面自己用启发式挑落点（不经过决策层）。 */
-      async function autoStep() {
-        if (opMode !== "auto" || paused || autoBusy || !view || view.done) return;
-        autoBusy = true;
-        try {
-          const best = tetrisHeuristicPlacement(view.raw);
-          if (best?.placement) await postAction(`drop:${best.placement.rot},${best.placement.x}`);
-        } catch { /* 下个周期重试 */ } finally {
-          autoBusy = false;
-        }
+      // ------------------------------------------------------------------ 本地自动模式
+      function scheduleAuto() {
+        clearTimeout(timer);
+        if (opMode !== "auto" || paused || !alive()) return;
+        timer = setTimeout(() => {
+          if (opMode !== "auto" || paused || !alive()) return scheduleAuto();
+          autoDrop();
+          scheduleAuto();
+        }, 220);
       }
 
       // ------------------------------------------------------------------ 输入
-      window.addEventListener("keydown", async (e) => {
-        // 空格无条件吞掉：这是游戏页的常规防御 —— 当某个按钮持有焦点时，
-        // 按空格的默认行为是"点击那个按钮"，玩游戏时会误触界面控件。
-        // （注：曾把一次棋盘被隐藏误判成这个原因，其实是用户自己点的；这里是预防，不是已复现的 bug。）
-        // 输入框/下拉框除外。
-        if (e.key === " ") {
-          const tag = (e.target?.tagName ?? "").toLowerCase();
-          if (tag !== "input" && tag !== "select" && tag !== "textarea") e.preventDefault();
-        }
-        if (opMode !== "human" || paused || !view || view.done) return;
+      window.addEventListener("keydown", (e) => {
+        const tag = (e.target?.tagName ?? "").toLowerCase();
+        if (tag === "input" || tag === "select" || tag === "textarea") return;
+        if (e.key === " " && TAKEOVER) return;
         if (e.key === "p" || e.key === "P") {
           paused = !paused;
-          els.play.textContent = paused ? "继续" : "暂停";
+          renderPanels();
+          scheduleAuto();
           e.preventDefault();
           return;
         }
+        if (opMode !== "human" || paused || !alive()) return;
         switch (e.key) {
-          case "ArrowLeft": nudge(-1, 0); break;
-          case "ArrowRight": nudge(1, 0); break;
-          case "ArrowUp": case "x": case "X": nudge(0, 1); break;
-          case "ArrowDown": nudge(0, 0); break;
-          case " ": await commitPending(); return;
+          case "ArrowLeft": tetrisMove(state, -1); break;
+          case "ArrowRight": tetrisMove(state, 1); break;
+          case "ArrowUp": case "x": case "X": tetrisRotate(state, 1); break;
+          case "ArrowDown": tetrisStepDown(state); break;
+          case " ": tetrisHardDrop(state); break;
           default: return;
         }
         e.preventDefault();
+        renderAll();
+        if (!alive()) finish();
       });
 
       for (const btn of document.querySelectorAll(".mode")) {
         btn.addEventListener("click", () => {
           opMode = btn.dataset.mode;
           for (const b of document.querySelectorAll(".mode")) b.classList.toggle("active", b === btn);
+          scheduleAuto();
         });
       }
 
-      els.play.addEventListener("click", async () => {
-        if (view?.done) { await resetEpisode(); paused = false; return; }
+      els.play.addEventListener("click", () => {
+        if (!alive()) return newGame();
         paused = !paused;
-        els.play.textContent = paused ? "继续" : "暂停";
+        renderPanels();
+        scheduleAuto();
       });
-      els.reset.addEventListener("click", resetEpisode);
-      els.difficulty.addEventListener("change", resetEpisode);
-
-      function applyBoardVisibility(hidden) {
-        els.layout.classList.toggle("board-hidden", hidden);
+      els.reset.addEventListener("click", newGame);
+      els.difficulty.addEventListener("change", newGame);
+      els.toggleBoard.addEventListener("click", () => {
+        const hidden = els.toggleBoard.textContent === "隐藏棋盘";
+        document.getElementById("layout").classList.toggle("board-hidden", hidden);
         els.toggleBoard.textContent = hidden ? "显示棋盘" : "隐藏棋盘";
         localStorage.setItem("dsh-decision-engine.ui.tetris.boardHidden", hidden ? "1" : "0");
-      }
-      els.toggleBoard.addEventListener("click", () => applyBoardVisibility(!els.layout.classList.contains("board-hidden")));
+      });
       els.recentToggle.addEventListener("click", () => {
         showRecent = !showRecent;
         els.recentToggle.textContent = showRecent ? "看最高分" : "看最近 8 局";
@@ -522,16 +526,17 @@
       });
 
       // ------------------------------------------------------------------ 启动
-      els.bridgeLabel.textContent = BRIDGE;
       els.difficulty.value = params.get("difficulty") ?? "normal";
       const hideParam = params.get("hide");
-      applyBoardVisibility(
-        hideParam === "1" ? true : hideParam === "0" ? false : localStorage.getItem("dsh-decision-engine.ui.tetris.boardHidden") === "1",
-      );
+      const hideInit = hideParam === "1" ? true : hideParam === "0" ? false
+        : localStorage.getItem("dsh-decision-engine.ui.tetris.boardHidden") === "1";
+      if (hideInit) {
+        document.getElementById("layout").classList.add("board-hidden");
+        els.toggleBoard.textContent = "显示棋盘";
+      }
+      newGame();
       renderRecords();
-      poll();
-      setInterval(poll, POLL_MS);
-      setInterval(autoStep, 90);
+      setInterval(() => { elapsedMs = Date.now() - startedAt; }, 1000);
     </script>
   </body>
 </html>
