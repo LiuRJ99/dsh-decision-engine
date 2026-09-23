@@ -364,7 +364,7 @@
           ? `食物相对蛇头 dx=${s.food_offset.dx} dy=${s.food_offset.dy} 距离=${s.food_distance}`
           : "无食物");
         lines.push(`可达空格=${s.free_cells_from_head} 障碍物=${s.blocked_obstacle_cells} 离自身尾部=${s.distance_to_own_tail}`);
-        lines.push(`本动作${actionCount} 每动作步数=${STRATEGY_STEPS}`);
+        lines.push(`本局动作数=${actionCount} 每动作步数=${STRATEGY_STEPS}`);
         if (SHOW_BOARD) {
           const grid = Array.from({ length: state.size }, () => new Array(state.size).fill("."));
           for (const o of state.obstacles ?? []) grid[o.y][o.x] = "#";
