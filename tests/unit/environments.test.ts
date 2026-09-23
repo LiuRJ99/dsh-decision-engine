@@ -126,10 +126,26 @@ describe('browser observation', () => {
     assert.equal(request.mode, 'choice')
     assert.equal(request.candidates.length >= 2, true)
     assert.ok(request.candidates.some(candidate => /Continue/.test(candidate.description)))
-    assert.ok(request.candidates.some(candidate => candidate.id === 'wait'))
+    // A settled page offers no no-op candidate: `wait` on a page that will not
+    // change is answered again on every following step (the provider is
+    // deterministic), so a bounded loop dies at `no_progress` having done
+    // nothing. Every candidate offered here must mutate the page.
+    assert.equal(request.candidates.some(candidate => candidate.id === 'wait'), false)
     const state = request.state as Record<string, unknown>
     assert.equal(state.title, 'State A')
     assert.equal((state.interactive as unknown[]).length, 2)
+  })
+
+  it('offers the wait candidate only while the document is still loading', async () => {
+    const page = new FakeBrowser({
+      title: 'Loading',
+      main: '正在加载…',
+      status: 'loading',
+      items: [{ index: 1, role: 'button', name: 'Refresh' }],
+    })
+    const adapter = new BrowserEnvironmentAdapter({ dispatcher: page.dispatcher() })
+    const request = adapter.buildDecisionRequest(await adapter.observe(), OBJECTIVE)
+    assert.ok(request.candidates.some(candidate => candidate.id === 'wait'))
   })
 
   it('reports unsupported when the session capability refuses the snapshot', async () => {

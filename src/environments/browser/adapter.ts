@@ -418,7 +418,13 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
       })
     }
 
-    if (snapshot.items.length > 0 || snapshot.forms.length > 0) {
+    // `wait` is offered only while the document is still loading. On a *settled*
+    // page it is not an action: the page will not change, so the next request is
+    // byte-identical to this one and a deterministic provider answers `wait`
+    // again — a bounded loop then dies at `no_progress` (three unchanged states)
+    // without having done anything at all. It is also the only candidate that
+    // cannot advance any objective; every other candidate here mutates the page.
+    if (snapshot.status === 'loading' && (snapshot.items.length > 0 || snapshot.forms.length > 0)) {
       push({ id: 'wait', description: 'Wait for the page to change', action: { kind: 'wait', target: 'wait' } })
     }
     return candidates

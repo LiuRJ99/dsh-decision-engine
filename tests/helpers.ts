@@ -137,12 +137,15 @@ export class FakeBrowser {
   failWith: string | undefined
   /** When true, the page renders no interactive inventory. */
   empty = false
+  /** The bridge's `Status:` header — `complete` on a settled document, `loading` while it settles. */
+  status = 'complete'
 
-  constructor(init: { title?: string; url?: string; main?: string; items?: FakePageItem[] }) {
+  constructor(init: { title?: string; url?: string; main?: string; items?: FakePageItem[]; status?: string }) {
     this.title = init.title ?? 'Fake page'
     this.url = init.url ?? 'https://example.test/'
     this.main = init.main ?? ''
     this.items = init.items ?? []
+    this.status = init.status ?? 'complete'
   }
 
   /** The dispatcher the browser adapter consumes. */
@@ -182,7 +185,7 @@ export class FakeBrowser {
     const lines: string[] = []
     lines.push(`Title: ${this.title}`)
     lines.push(`URL: ${this.url}`)
-    lines.push('Status: complete')
+    lines.push(`Status: ${this.status}`)
     if (this.main !== '') {
       lines.push('')
       lines.push('Main content:')
