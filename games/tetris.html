@@ -207,7 +207,20 @@
 
       // ------------------------------------------------------------------ 局面（全部在页面里）
       let state = null;
-      let seed = Number(params.get("seed") ?? Math.floor(Math.random() * 1e6));
+      /**
+       * 随机种子：`?seed=N` 时**第一局**就用 N，之后每开一局 N+1、N+2……
+       * （URL 给的种子以前被 newGame() 无条件覆盖，参数等于没有；现在它是可复现的基线，
+       *  "重来"仍然是新的一局，只是确定性地往下推。）
+       */
+      const SEED_BASE = (() => {
+        const raw = params.get("seed");
+        if (raw === null || raw.trim() === "") return null;
+        const n = Number(raw);
+        return Number.isFinite(n) ? Math.trunc(n) : null;
+      })();
+      let gamesPlayed = 0;
+      const nextSeed = () => SEED_BASE === null ? Math.floor(Math.random() * 1e6) : SEED_BASE + gamesPlayed++;
+      let seed = SEED_BASE ?? Math.floor(Math.random() * 1e6);
       let opMode = "human";        // human | auto
       let paused = false;
       let actionCount = 0;
@@ -222,14 +235,27 @@
       let sessionExperience = null;
 
       const alive = () => state.alive !== false;
+
+      /**
+       * 谁在开这一局 —— 记录归属靠它。
+       *
+       * 以前 `finish()` 把 engine 写死成 "human"，于是决策层（浏览器插件点策略按钮）
+       * 打出来的成绩全被记成「人类」，一眼就能看出不对。
+       * 判定依据是事件可信度：插件点按钮走的是合成事件（`isTrusted === false`、
+       * 也没有坐标），人点按钮/按键都是可信事件；本地启发式自动落则显式标记。
+       */
+      const drivers = new Set();
+      const markDriver = (who) => drivers.add(who);
+      const driverOf = () => drivers.size === 0 ? "human" : drivers.size === 1 ? [...drivers][0] : "mixed";
       const pieceName = (p) => (p == null ? "?" : typeof p === "string" ? p : (p.type ?? "?"));
 
       function newGame() {
         clearTimeout(timer); clearTimeout(playTimer);
         timer = null; playTimer = null;
-        seed = Math.floor(Math.random() * 1e6);
+        seed = nextSeed();
         state = createTetrisState({ seed, difficulty: els.difficulty.value });
         actionCount = 0;
+        drivers.clear();
         startedAt = Date.now();
         elapsedMs = 0;
         lastStrategy = null;
@@ -246,10 +272,11 @@
         timer = null; playTimer = null;
         addRecord("tetris", {
           game: "tetris",
-          engine: "human",
+          engine: driverOf(),
           mode: lastStrategy ? "strategy" : opMode,
           strategy: lastStrategy,
           score: state.score,
+          durationMs: elapsedMs || Date.now() - startedAt,
           difficulty: els.difficulty.value,
           detail: `${state.lines} 行 / ${state.pieces} 块 / ${zhCause(state.cause)}`,
         });
@@ -284,6 +311,7 @@
       function autoDrop() {
         const best = tetrisHeuristicPlacement(state);
         if (!best?.placement) return;
+        markDriver("local");
         actionCount += 1;
         tetrisApplyPlacement(state, best.placement);
         renderAll();
@@ -338,7 +366,10 @@
           for (const strategy of TETRIS_STRATEGIES) {
             const b = document.createElement("button");
             b.dataset.strategy = strategy;
-            b.addEventListener("click", () => playStrategy(strategy));
+            b.addEventListener("click", (e) => {
+              markDriver(e.isTrusted ? "human" : "decision-layer");
+              playStrategy(strategy);
+            });
             els.strategyButtons.appendChild(b);
           }
         }
@@ -506,6 +537,7 @@
           case " ": tetrisHardDrop(state); break;
           default: return;
         }
+        markDriver("human");
         e.preventDefault();
         renderAll();
         if (!alive()) finish();

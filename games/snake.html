@@ -163,6 +163,8 @@
       const STRATEGY_STEPS = Number(params.get("steps") ?? 8);
       /** 每格之间的节拍 —— 让人和接管方都看得见蛇在走，而不是瞬移。 */
       const STEP_MS = Number(params.get("pace") ?? 110);
+      /** 盘面图开关（默认开）。`?board=0` 关掉，用来做"图对决策有没有帮助"的 A/B。 */
+      const SHOW_BOARD = params.get("board") !== "0";
 
       // ------------------------------------------------------------------ 元素
       const canvas = document.getElementById("board");
@@ -207,7 +209,20 @@
 
       // ------------------------------------------------------------------ 局面（全部在页面里）
       let state = null;
-      let seed = Number(params.get("seed") ?? Math.floor(Math.random() * 1e6));
+      /**
+       * 随机种子：`?seed=N` 时**第一局**就用 N，之后每开一局 N+1、N+2……
+       * （URL 给的种子以前被 newGame() 无条件覆盖，参数等于没有；现在它是可复现的基线，
+       *  "重来"仍然是新的一局，只是确定性地往下推。）
+       */
+      const SEED_BASE = (() => {
+        const raw = params.get("seed");
+        if (raw === null || raw.trim() === "") return null;
+        const n = Number(raw);
+        return Number.isFinite(n) ? Math.trunc(n) : null;
+      })();
+      let gamesPlayed = 0;
+      const nextSeed = () => SEED_BASE === null ? Math.floor(Math.random() * 1e6) : SEED_BASE + gamesPlayed++;
+      let seed = SEED_BASE ?? Math.floor(Math.random() * 1e6);
       let opMode = "human";        // human | auto
       let paused = false;
       // 状态**立刻结算**，动画只是事后播放 —— 这是为了避开一个实测到的竞态：
@@ -228,12 +243,25 @@
 
       const alive = () => state.alive !== false;
 
+      /**
+       * 谁在开这一局 —— 记录归属靠它。
+       *
+       * 以前 `finish()` 把 engine 写死成 "human"，于是决策层（浏览器插件点策略按钮）
+       * 打出来的成绩全被记成「人类」，一眼就能看出不对。
+       * 判定依据是事件可信度：插件点按钮走的是合成事件（`isTrusted === false`、
+       * 也没有坐标），人点按钮/按键都是可信事件；本地启发式自动走则显式标记。
+       */
+      const drivers = new Set();
+      const markDriver = (who) => drivers.add(who);
+      const driverOf = () => drivers.size === 0 ? "human" : drivers.size === 1 ? [...drivers][0] : "mixed";
+
       function newGame() {
         clearTimeout(timer); clearTimeout(playTimer);
         timer = null; playTimer = null;
-        seed = Math.floor(Math.random() * 1e6);
+        seed = nextSeed();
         state = createSnakeState({ size: 20, seed, difficulty: els.difficulty.value });
         actionCount = 0;
+        drivers.clear();
         startedAt = Date.now();
         elapsedMs = 0;
         lastStrategy = null;
@@ -300,10 +328,11 @@
         timer = null; playTimer = null;
         addRecord("snake", {
           game: "snake",
-          engine: "human",
+          engine: driverOf(),
           mode: lastStrategy ? "strategy" : opMode,
           strategy: lastStrategy,
           score: state.score,
+          durationMs: elapsedMs || Date.now() - startedAt,
           difficulty: els.difficulty.value,
           detail: `${state.snake.length} 长 / ${state.steps} 步 / ${zhCause(cause)}`,
         });
@@ -321,7 +350,10 @@
        * 自己另写文案等于换输入分布（这个坑踩过）。
        *
        * **刻意不在文字里重复列候选**：按钮标签已经作为候选出现在快照里（浏览器环境把可点元素
-       * 渲染成编号清单），再写一遍白占上下文 —— Laya 的窗口只有 512 token。
+       * 渲染成编号清单），再写一遍白占上下文。
+       *
+       * 盘面图和方块页同一口径：**画布上有什么，图上就有什么**（蛇头 @、蛇身 o、食物 *、
+       * 障碍 #、空 .），一行 20 格、共 20 行。`?board=0` 可以关掉它 —— A/B 用。
        */
       function renderTakeover() {
         const s = snakeLayaState(state);
@@ -332,7 +364,18 @@
           ? `食物相对蛇头 dx=${s.food_offset.dx} dy=${s.food_offset.dy} 距离=${s.food_distance}`
           : "无食物");
         lines.push(`可达空格=${s.free_cells_from_head} 障碍物=${s.blocked_obstacle_cells} 离自身尾部=${s.distance_to_own_tail}`);
-        lines.push(`本局动作数=${actionCount} 每动作步数=${STRATEGY_STEPS}`);
+        lines.push(`本动作${actionCount} 每动作步数=${STRATEGY_STEPS}`);
+        if (SHOW_BOARD) {
+          const grid = Array.from({ length: state.size }, () => new Array(state.size).fill("."));
+          for (const o of state.obstacles ?? []) grid[o.y][o.x] = "#";
+          if (state.food) grid[state.food.y][state.food.x] = "*";
+          for (let i = state.snake.length - 1; i >= 0; i -= 1) {
+            const c = state.snake[i];
+            grid[c.y][c.x] = i === 0 ? "@" : "o";
+          }
+          lines.push("盘面（@ 蛇头，o 蛇身，* 食物，# 障碍，. 空；第一行是最上面一行）：");
+          for (const row of grid) lines.push(row.join(""));
+        }
         lines.push(alive()
           ? "【进行中】"
           : `【本局结束】${JSON.stringify({ score: state.score, steps: state.steps, length: state.snake.length, cause: state.cause ?? null })}`);
@@ -349,7 +392,10 @@
           for (const strategy of SNAKE_STRATEGIES) {
             const b = document.createElement("button");
             b.dataset.strategy = strategy;
-            b.addEventListener("click", () => playStrategy(strategy));
+            b.addEventListener("click", (e) => {
+              markDriver(e.isTrusted ? "human" : "decision-layer");
+              playStrategy(strategy);
+            });
             els.strategyButtons.appendChild(b);
           }
         }
@@ -457,7 +503,7 @@
         timer = setTimeout(() => {
           if (opMode !== "auto" || paused || !alive()) return scheduleAuto();
           const best = snakeHeuristicAction(state, snakeFacts(state));
-          if (best?.action) stepOnce(best.action);
+          if (best?.action) { markDriver("local"); stepOnce(best.action); }
           scheduleAuto();
         }, Math.max(30, Number(els.speed.value)));
       }
@@ -481,6 +527,7 @@
         if (!dir || opMode !== "human" || paused || !alive()) return;
         e.preventDefault();
         if (!snakeLegalActions(state).includes(dir)) return;
+        markDriver("human");
         actionCount += 1;
         stepOnce(dir);
       });

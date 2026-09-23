@@ -108,51 +108,15 @@ export function renderRecords(el, game, { limit = 8, recent = false } = {}) {
     .join("")}</div>`;
 }
 
-/** 兼容旧名字 */
-export const renderRecordTable = renderRecords;
-
 export function renderSummaryLine(el, game) {
   if (!el) return;
-  const s = summary(game);
-  if (s.plays === 0) {
+  const { total, best, byEngine } = summary(game);
+  if (total === 0) {
     el.textContent = "暂无记录";
     return;
   }
-  const engines = Object.entries(s.bestByEngine)
+  const engines = Object.entries(byEngine)
     .map(([k, v]) => `${ENGINE_LABELS[k] ?? k} ${v}`)
     .join(" · ");
-  el.textContent = `共 ${s.plays} 局（人类 ${s.humanPlays} / AI ${s.machinePlays}）｜最高 ${s.best}｜${engines}`;
-}
-
-/** Laya 健康状态徽章。 */
-export async function renderHealthBadge(el) {
-  if (!el) return null;
-  const { fetchHealth } = await import("./npc-client.js");
-  const health = await fetchHealth();
-  if (!health) {
-    el.className = "badge bad";
-    el.textContent = "服务未启动";
-    return null;
-  }
-  const info = health.laya ?? {};
-  if (info.status === "ready") {
-    el.className = "badge ok";
-    el.textContent = `Laya 就绪 · 加载 ${info.loadMs}ms · 已调用 ${info.stats?.calls ?? 0} 次`;
-  } else if (info.status === "failed") {
-    el.className = "badge bad";
-    el.textContent = "Laya 加载失败（自动用本地启发式兜底）";
-  } else if (info.status === "offline") {
-    el.className = "badge warn";
-    el.textContent = "未安装 Laya 模型：决策走本地策略（想用真模型见玩法说明）";
-  } else if (info.status === "idle") {
-    el.className = "badge warn";
-    el.textContent = "Laya 未加载（静态模式：决策走本地兜底）";
-  } else if (info.status === "loading") {
-    el.className = "badge warn";
-    el.textContent = "Laya 正在加载…";
-  } else {
-    el.className = "badge warn";
-    el.textContent = `Laya 状态：${info.status}`;
-  }
-  return health;
+  el.textContent = `共 ${total} 局｜最高 ${best}${engines === "" ? "" : `｜各引擎最好：${engines}`}`;
 }

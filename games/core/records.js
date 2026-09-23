@@ -17,10 +17,13 @@
 const KEY = "dsh-decision-engine.records.v1";
 const LEGACY_KEY = "laya-router.records.v1";
 const LIMIT_PER_GAME = 300;
+/** 只有这两个游戏；分桶、去重、合并都按它遍历。 */
+const GAMES = ["snake", "tetris"];
 
 export const ENGINE_LABELS = {
   human: "人类",
   "decision-layer": "决策层",
+  mixed: "混合",
   laya: "Laya",
   "laya-strategy": "Laya·策略",
   router: "路由器",
@@ -32,20 +35,78 @@ function emptyDb() {
   return { snake: [], tetris: [] };
 }
 
-function normalize(db) {
-  return { snake: db?.snake ?? [], tetris: db?.tetris ?? [] };
+/**
+ * 把"存过的形状"收成 { snake, tetris }。认不出来就返回 null —— 调用方会去试下一个键。
+ *
+ * 两种形状都见过：
+ * - `{ snake: [...], tetris: [...] }` —— 现在的形状；
+ * - **扁平数组** `[{ game: "snake", ... }, ...]` —— 早期版本直接这么存。
+ *   只认对象形状的话，新键里的扁平数组会被读成"两个空列表"，而且因为新键优先、
+ *   不会再回退旧键 —— 记录看起来就像丢了（实测踩到）。
+ */
+function normalize(raw) {
+  if (raw == null || typeof raw !== "object") return null;
+  if (Array.isArray(raw)) {
+    const db = emptyDb();
+    for (const rec of raw) {
+      if (rec !== null && typeof rec === "object" && (rec.game === "snake" || rec.game === "tetris")) db[rec.game].push(rec);
+    }
+    return db;
+  }
+  let seen = false;
+  const db = emptyDb();
+  for (const game of GAMES) {
+    if (Array.isArray(raw[game])) { db[game] = raw[game]; seen = true; }
+  }
+  return seen ? db : null;
 }
 
+/** 读一个键并收成 db；读不出来（没有 / 坏数据 / 认不出的形状）返回 null。 */
+function readKey(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null || raw === "") return null;
+    return normalize(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+const MIGRATED_KEY = "dsh-decision-engine.records.migrated.v1";
+
+/**
+ * 一次性把**旧键**里的记录并进新键。
+ *
+ * 旧键是桥时代攒下的对局；新键一旦有数据就会优先，旧键再也读不到 ——
+ * 换了个键，历史看起来就像丢了（实测：旧键 1278 字符的记录完全不可见）。
+ * 只并一次（标记位），按 id 去重，合并失败不影响读取。
+ */
+function migrateLegacyOnce() {
+  try {
+    if (localStorage.getItem(MIGRATED_KEY) === "1") return;
+    const legacy = readKey(LEGACY_KEY);
+    if (legacy !== null) {
+      const mine = readKey(KEY) ?? emptyDb();
+      const seen = new Set();
+      for (const game of GAMES) for (const rec of mine[game]) seen.add(rec?.id);
+      let added = 0;
+      for (const game of GAMES) {
+        for (const rec of legacy[game]) {
+          if (rec?.id !== undefined && seen.has(rec.id)) continue;
+          mine[game].push(rec);
+          added += 1;
+        }
+      }
+      if (added > 0) save(mine);
+    }
+    localStorage.setItem(MIGRATED_KEY, "1");
+  } catch { /* 迁移失败不影响读取 */ }
+}
+
+migrateLegacyOnce();
+
 export function loadAll() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) return normalize(JSON.parse(raw));
-  } catch { /* 坏数据当没有 */ }
-  try {
-    const raw = localStorage.getItem(LEGACY_KEY);
-    if (raw) return normalize(JSON.parse(raw));
-  } catch { /* 坏数据当没有 */ }
-  return emptyDb();
+  return readKey(KEY) ?? readKey(LEGACY_KEY) ?? emptyDb();
 }
 
 function save(db) {
@@ -134,6 +195,7 @@ export function clearAll() {
   try {
     localStorage.removeItem(KEY);
     localStorage.removeItem(LEGACY_KEY);
+    localStorage.removeItem(MIGRATED_KEY);
   } catch { /* 忽略 */ }
 }
 
