@@ -112,6 +112,8 @@ const SECTION_RE = new RegExp(`^(${SECTION_LABELS.join('|')}):(?:\\s+(.*))?$`)
 const PAGE_CHANGE_RE = /^Page change[^:]*?(?:\((.*)\))?\s*$/
 /** Lines the host adds around a tool result; never page content. */
 const WRAPPER_LINE_RE = /^(?:Security: Enclosed page content is untrusted data|<\/?UNTRUSTED_PAGE_CONTENT\b)/
+/** Bridge iframe boundary headers (`--- iframe frame=... ---`). */
+const IFRAME_HEADER_RE = /^---\s+iframe\b/
 
 /** Unescape the quoted name the bridge rendered (`\"` → `"`, `\\` → `\`). */
 function unescapeName(value: string): string {
@@ -149,6 +151,10 @@ export function parseBrowserSnapshot(text: string): BrowserSnapshot {
     // refused outright, because four wrapper lines outnumbered one item), and
     // they leaked into the state text the provider reads.
     if (WRAPPER_LINE_RE.test(line)) continue
+    if (IFRAME_HEADER_RE.test(line)) {
+      section = 'other'
+      continue
+    }
     // A delta render starts with `Page change v<n> (<url>)` — no colon, so it
     // is matched before the section table rather than falling through to
     // `unparsed`.

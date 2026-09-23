@@ -122,6 +122,25 @@ describe('browser snapshot parsing', () => {
     assert.equal(snapshot.items.length, 1)
   })
 
+  it('skips inaccessible iframe headers and parenthesized notes without unparsed lines', () => {
+    const snapshot = parseBrowserSnapshot([
+      'Title: 📝 在线刷题',
+      'URL: https://n-ooob.github.io/choice-quiz/',
+      'Status: complete',
+      '',
+      'Main content:',
+      '第 1 题',
+      '',
+      'Interactive elements:',
+      '  [1] button "下一题"',
+      '',
+      '--- iframe frame=7 parent=-1 origin=https://www.google.com ---',
+      '(This iframe was inaccessible or destroyed while loading.)',
+    ].join('\n'))
+    assert.equal(snapshot.items.length, 1)
+    assert.equal(snapshot.unparsed.length, 0)
+  })
+
   it('ignores the host envelope around a tool result', () => {
     // The host wraps every tool result in an untrusted-content envelope. Those
     // lines are transport: counting them as unparsed made a tightly scoped
