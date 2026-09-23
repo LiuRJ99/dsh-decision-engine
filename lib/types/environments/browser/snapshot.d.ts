@@ -39,6 +39,10 @@ export interface SnapshotItem {
     name: string;
     disabled: boolean;
     checked?: boolean;
+    selected?: boolean;
+    pressed?: boolean;
+    /** Raw DOM class tokens; never interpreted as semantic checked state. */
+    domClasses?: string;
     outsideViewport: boolean;
     /** Link target when the bridge rendered one. */
     href?: string;
@@ -77,6 +81,10 @@ export interface BrowserSnapshot {
     canvasLike: boolean;
     /** Characters of main content, for truncation heuristics. */
     mainChars: number;
+    inventoryScope?: {
+        includeNonSemantic: boolean;
+        candidateSelector?: string;
+    };
 }
 /**
  * Parse one `browser_snapshot` text payload.

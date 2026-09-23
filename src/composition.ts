@@ -94,6 +94,8 @@ export interface Config {
 
 /** Browser environment config, as read from `decisionEngine.browser`. */
 export interface BrowserEnvironmentConfig {
+  includeNonSemantic?: boolean
+  candidateSelector?: string
   /** Whether the browser environment is registered. Defaults to true. */
   enabled?: boolean
   /** Environment id to register it under. Defaults to `browser`. */
@@ -221,6 +223,8 @@ export const Config: z<Config> = z.object({
     ),
   }).description('Budgets and stop conditions shared by every environment.'),
   browser: z.object({
+    includeNonSemantic: z.boolean().default(false).description('Opt in to inferred clickable elements. Requires browser workspace v0.1.10 or newer.'),
+    candidateSelector: z.string().description('CSS selector limiting inventory candidates before size caps. Prefer task-local overrides for site-specific selectors.'),
     enabled: z.boolean().default(true).description('Whether the browser environment is available to the decision layer.'),
     environmentId: z.string().description('Environment id to register it under. Defaults to "browser".'),
     maxCandidates: z.number().description('Maximum number of page controls offered to the decider. Defaults to 12.'),
@@ -323,6 +327,8 @@ export function createDecisionEngineComposition(options: {
       dispatcher: options.dispatcher,
       config: {
         strategy: browserCandidates === undefined ? 'form' : 'patch',
+        ...config.browser?.includeNonSemantic === undefined ? {} : { includeNonSemantic: config.browser.includeNonSemantic },
+        ...config.browser?.candidateSelector === undefined ? {} : { candidateSelector: config.browser.candidateSelector },
         ...browserCandidates === undefined ? {} : { candidates: browserCandidates },
         ...config.browser?.maxCandidates === undefined ? {} : { maxCandidates: config.browser.maxCandidates },
         ...config.browser?.maxStateChars === undefined ? {} : { maxStateChars: config.browser.maxStateChars },

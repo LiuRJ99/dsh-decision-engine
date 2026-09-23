@@ -6,6 +6,7 @@ import type { CompletionRule } from '../environments/types.ts'
 import type { DecisionEngineService } from '../service.ts'
 import type { TaskOutcome, TaskPlanStep } from '../runtime/runner.ts'
 import type { ToolExecutionScope } from './execution-scope.ts'
+import { BROWSER_OPTIONS_PARAMETER, taskEnvironment, type BrowserTaskOptions } from './browser-options.ts'
 
 interface TaskReport {
   taskId: string
@@ -24,6 +25,7 @@ interface TaskReport {
 }
 
 export interface RunTaskInput {
+  browser?: BrowserTaskOptions
   objective: string
   /** Exactly one of environment/endpoint is required. */
   environment?: string
@@ -40,7 +42,8 @@ export async function executeRunTask(input: RunTaskInput, service: DecisionEngin
   if (typeof input.objective !== 'string' || input.objective.trim() === '') throw new DecisionError('invalid_request', 'A task needs a non-empty objective.')
   if ((input.environment === undefined) === (input.endpoint === undefined)) throw new DecisionError('invalid_request', 'Pass exactly one of environment or endpoint.')
   if (input.maxDurationMs !== undefined && input.maxDurationMs > 1_800_000) throw new DecisionError('invalid_request', 'DSH tasks may run for at most 30 minutes per call.')
-  const environment = input.endpoint === undefined ? input.environment! : new HttpEnvironmentAdapter({ endpoint: input.endpoint })
+  if (input.endpoint !== undefined && input.browser !== undefined) throw new DecisionError('invalid_request', 'Browser settings cannot be used with an HTTP endpoint.')
+  const environment = input.endpoint === undefined ? taskEnvironment(service, input.environment, input.browser) : new HttpEnvironmentAdapter({ endpoint: input.endpoint })
   return service.runTask({
     environment,
     objective: { description: input.objective, ...input.completion === undefined ? {} : { completion: input.completion } },
@@ -69,6 +72,7 @@ export function defineRunTool(service: DecisionEngineService, scope?: ToolExecut
     parameters: {
       objective: { type: 'string', required: true, description: 'The whole task and intended final outcome.' },
       environment: { type: 'string', description: 'Registered environment id, such as browser or computer.' },
+      browser: BROWSER_OPTIONS_PARAMETER,
       endpoint: { type: 'string', description: 'Base URL of the environment API exposing GET state and POST action.' },
       provider: { type: 'string', description: 'Optional decision provider id.' },
       maxSteps: { type: 'integer', description: 'Total action budget; defaults to 1000.' },

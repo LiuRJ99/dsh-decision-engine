@@ -203,6 +203,7 @@ decisionEngine:
 
   browser:
     enabled: true
+    includeNonSemantic: false # Prefer task-local opt-in for third-party controls.
   computer:
     enabled: true
     # app: com.apple.TextEdit      # target app; omit until one is chosen
@@ -212,6 +213,23 @@ decisionEngine:
 Environment variables the Laya provider honours (read only inside
 `providers/laya/config.ts`): `LAYA_MODEL_DIR`, `LAYA_EP`, `LAYA_THREADS`,
 `LAYA_CACHE`, `LAYA_REVISION`, `LAYA_SUBFOLDER`.
+
+## Non-semantic browser controls
+
+From v0.3.0, `decision_run` and `decision_decide` accept task-local `browser`
+options: `includeNonSemantic`, `candidateSelector` and `maxCandidates` (1–64).
+They require browser workspace v0.1.10 / bridge v0.0.10 or newer. For example,
+`browser: { includeNonSemantic: true, candidateSelector: '.option-item, #next-btn' }`
+offers inferred clickable controls only within that selector. Filters apply
+before inventory caps, include form fields, and never fall back to the full page.
+The extension must acknowledge the requested scope or observation stops.
+
+Discovery uses named, visible inline-click controls and pointer boundaries,
+not every div. Raw class tokens and explicit ARIA states let the provider see
+selection changes; classes are untrusted evidence, not inferred checked states.
+This adds addressable actions, not answer knowledge. Completion rules must
+verify the intended business result. Global browser settings remain available;
+task-local options do not mutate the registered adapter.
 
 ## Adding a provider
 

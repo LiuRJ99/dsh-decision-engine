@@ -186,7 +186,7 @@ describe('tool definition', () => {
     const { service } = composition()
     const { PARAMETERS } = await import('../../src/tools/decide-logic.ts')
     assert.deepEqual(Object.keys(PARAMETERS).sort(), [
-      'allowRisky', 'candidates', 'constraints', 'debug', 'environment', 'execute', 'maxSteps', 'mode', 'objective', 'provider', 'state',
+      'allowRisky', 'browser', 'candidates', 'constraints', 'debug', 'environment', 'execute', 'maxSteps', 'mode', 'objective', 'provider', 'state',
     ])
     const source = await import('node:fs').then(fs => fs.readFileSync(new URL('../../src/tools/decision-decide.ts', import.meta.url), 'utf8'))
     assert.match(source, /name: 'decision_decide'/)

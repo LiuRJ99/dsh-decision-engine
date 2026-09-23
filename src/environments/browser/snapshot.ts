@@ -40,6 +40,10 @@ export interface SnapshotItem {
   name: string
   disabled: boolean
   checked?: boolean
+  selected?: boolean
+  pressed?: boolean
+  /** Raw DOM class tokens; never interpreted as semantic checked state. */
+  domClasses?: string
   outsideViewport: boolean
   /** Link target when the bridge rendered one. */
   href?: string
@@ -80,6 +84,7 @@ export interface BrowserSnapshot {
   canvasLike: boolean
   /** Characters of main content, for truncation heuristics. */
   mainChars: number
+  inventoryScope?: { includeNonSemantic: boolean; candidateSelector?: string }
 }
 
 const ITEM_RE = /^\s*\[(\d+)]\s+(\S+)\s+"((?:[^"\\]|\\.)*)"\s*(?:\[([^\]]*)])?\s*(?:→\s*(.*))?$/
@@ -97,6 +102,7 @@ const SECTION_LABELS = [
   'Interactive elements',
   'Main content',
   'Form fields',
+  'Inventory scope',
   'Removed elements',
   'Title',
   'URL',
@@ -149,6 +155,18 @@ export function parseBrowserSnapshot(text: string): BrowserSnapshot {
     if (sectionMatch !== null) {
       const label = sectionMatch[1] ?? ''
       const rest = (sectionMatch[2] ?? '').trim()
+      if (label === 'Inventory scope') {
+        if (snapshot.inventoryScope === undefined) {
+          try {
+            const scope = JSON.parse(rest)
+            if (scope !== null && typeof scope.includeNonSemantic === 'boolean'
+              && (scope.candidateSelector === undefined || typeof scope.candidateSelector === 'string')) snapshot.inventoryScope = scope
+            else snapshot.unparsed.push(line)
+          } catch { snapshot.unparsed.push(line) }
+        }
+        section = 'header'
+        continue
+      }
       if (label === 'Title') {
         // First one wins. The bridge appends per-frame sections after the page
         // (`--- iframe frame=7 … ---` + that frame's own `Title:`/`URL:`), so a
@@ -253,7 +271,7 @@ function parseItem(line: string): SnapshotItem | undefined {
   if (!Number.isInteger(index)) return undefined
   const role = match[2] ?? ''
   const name = unescapeName(match[3] ?? '')
-  const state = match[4] ?? ''
+  const state = (match[4] ?? '').split('/')
   const href = match[5]
   const item: SnapshotItem = {
     index,
@@ -264,6 +282,14 @@ function parseItem(line: string): SnapshotItem | undefined {
   }
   if (state.includes('checked')) item.checked = true
   else if (state.includes('unchecked')) item.checked = false
+  if (state.includes('selected')) item.selected = true
+  else if (state.includes('unselected')) item.selected = false
+  if (state.includes('pressed')) item.pressed = true
+  else if (state.includes('unpressed')) item.pressed = false
+  const classes = state.find(flag => flag.startsWith('classes='))
+  if (classes !== undefined) {
+    try { item.domClasses = decodeURIComponent(classes.slice('classes='.length)) } catch { /* Ignore malformed optional evidence. */ }
+  }
   if (href !== undefined && href.trim() !== '') item.href = href.trim()
   return item
 }

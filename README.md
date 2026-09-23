@@ -233,6 +233,7 @@ decisionEngine:
 
   browser:
     enabled: true
+    includeNonSemantic: false       # 按任务开启更合适，见下文
     maxCandidates: 12
     maxStateChars: 6000
 
@@ -246,6 +247,31 @@ decisionEngine:
 
   telemetryLimit: 200
 ```
+
+### 第三方页面的普通 div 控件
+
+v0.3.0 起可在 `decision_run` / `decision_decide` 的 `browser` 参数中临时开启扩展识别，
+不会修改全局配置。需要 browser workspace v0.1.10（bridge v0.0.10）或更新版本：
+
+```json
+{
+  "environment": "browser",
+  "objective": "回答当前题目，确认页面已记录答案",
+  "browser": {
+    "includeNonSemantic": true,
+    "candidateSelector": ".option-item",
+    "maxCandidates": 12
+  },
+  "completion": { "path": "main", "includes": "已答 1/49" }
+}
+```
+
+上例用于 `decision_run`；选择器和完成条件必须按实际页面调整，多步任务须包含必要的导航控件。
+选择器在扩展内、清单截断前过滤控件及表单；没有匹配项时不会退回整页。
+扩展识别有名称的可见 `onclick` / pointer 边界元素，标记为 `clickable`，
+并传回原始 class 与明确的 ARIA 状态。class 只是页面线索，不自动等同于选中状态。
+插件会检查扩展是否确认候选范围，旧版扩展忽略参数时停止执行。
+识别动作不等于答对题；验收需确认答案记录、状态变化和业务完成，不能仅看循环结束。
 
 ### 通过内置设置面板配置
 

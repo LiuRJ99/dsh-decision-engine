@@ -3,7 +3,9 @@ import type { CompletionRule } from '../environments/types.ts';
 import type { DecisionEngineService } from '../service.ts';
 import type { TaskOutcome, TaskPlanStep } from '../runtime/runner.ts';
 import type { ToolExecutionScope } from './execution-scope.ts';
+import { type BrowserTaskOptions } from './browser-options.ts';
 export interface RunTaskInput {
+    browser?: BrowserTaskOptions;
     objective: string;
     /** Exactly one of environment/endpoint is required. */
     environment?: string;

@@ -54,6 +54,10 @@ export interface BrowserAdapterConfig {
     candidates?: BrowserActionCandidate[];
     /** Hard cap on derived candidates. Defaults to 12. */
     maxCandidates?: number;
+    /** Opt in to the bridge's inferred `clickable` inventory. Defaults to false. */
+    includeNonSemantic?: boolean;
+    /** Filter controls by CSS selector in the extension, before inventory caps. */
+    candidateSelector?: string;
     /** Hard cap on characters of page text placed into the decision state. Defaults to 6000. */
     maxStateChars?: number;
     /** Hard cap on characters of the objective. Defaults to 2000. */
@@ -99,6 +103,8 @@ export declare class BrowserEnvironmentAdapter implements EnvironmentAdapter {
         dispatcher: ToolDispatcher;
         config?: BrowserAdapterConfig;
     });
+    /** Task-local configuration; never mutates the registered adapter. */
+    withConfig(config: Pick<BrowserAdapterConfig, 'includeNonSemantic' | 'candidateSelector' | 'maxCandidates'>): BrowserEnvironmentAdapter;
     /**
      * Read the page as structured text.
      *

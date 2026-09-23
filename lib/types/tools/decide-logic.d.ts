@@ -24,6 +24,7 @@ import type { DecisionConfidenceKind, DecisionMode } from '../core/types.ts';
 import type { EnvironmentAction, Objective } from '../environments/types.ts';
 import type { ExecutionMode, RuntimeOutcome } from '../runtime/runner.ts';
 import type { DecisionEngineService } from '../service.ts';
+import { type BrowserTaskOptions } from './browser-options.ts';
 /** Lossless-JSON object, matching what the tool output schema can carry. */
 type JsonObject = Record<string, JsonValue>;
 /** One candidate as the tool accepts it. */
@@ -34,6 +35,7 @@ export interface DecideCandidateInput {
 }
 /** The tool's arguments. */
 export interface DecideToolInput {
+    browser?: BrowserTaskOptions;
     /** What the caller wants achieved. */
     objective?: string;
     /** Environment state: a string, or a structured object. */
@@ -107,6 +109,25 @@ export declare function objectiveOf(input: DecideToolInput): Objective;
 export declare function preflightDecideInput(input: DecideToolInput, service: DecisionEngineService): string | undefined;
 /** The tool's model-facing parameter schema. */
 export declare const PARAMETERS: {
+    readonly browser: {
+        type: "object";
+        additionalProperties: boolean;
+        description: string;
+        properties: {
+            includeNonSemantic: {
+                type: "boolean";
+                description: string;
+            };
+            candidateSelector: {
+                type: "string";
+                description: string;
+            };
+            maxCandidates: {
+                type: "integer";
+                description: string;
+            };
+        };
+    };
     readonly objective: {
         readonly type: "string";
         readonly description: "What the caller is trying to achieve. Prefer naming the concrete next outcome.";

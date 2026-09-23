@@ -88,6 +88,8 @@ export interface Config {
 }
 /** Browser environment config, as read from `decisionEngine.browser`. */
 export interface BrowserEnvironmentConfig {
+    includeNonSemantic?: boolean;
+    candidateSelector?: string;
     /** Whether the browser environment is registered. Defaults to true. */
     enabled?: boolean;
     /** Environment id to register it under. Defaults to `browser`. */

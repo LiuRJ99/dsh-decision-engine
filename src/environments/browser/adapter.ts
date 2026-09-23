@@ -61,6 +61,10 @@ export interface BrowserAdapterConfig {
   candidates?: BrowserActionCandidate[]
   /** Hard cap on derived candidates. Defaults to 12. */
   maxCandidates?: number
+  /** Opt in to the bridge's inferred `clickable` inventory. Defaults to false. */
+  includeNonSemantic?: boolean
+  /** Filter controls by CSS selector in the extension, before inventory caps. */
+  candidateSelector?: string
   /** Hard cap on characters of page text placed into the decision state. Defaults to 6000. */
   maxStateChars?: number
   /** Hard cap on characters of the objective. Defaults to 2000. */
@@ -111,7 +115,7 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
   readonly capabilities = ['observe', 'buildDecisionRequest', 'mapDecision', 'execute'] as const
 
   readonly #dispatcher: ToolDispatcher
-  readonly #config: Required<Omit<BrowserAdapterConfig, 'candidates'>> & { candidates: BrowserActionCandidate[] | undefined }
+  readonly #config: Required<Omit<BrowserAdapterConfig, 'candidates' | 'candidateSelector'>> & Pick<BrowserAdapterConfig, 'candidates' | 'candidateSelector'>
   /** Candidate index for the observation the last request was built from. */
   #pendingCandidates = new Map<string, BrowserActionCandidate>()
 
@@ -119,15 +123,25 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
     this.id = options.id ?? 'browser'
     this.#dispatcher = options.dispatcher
     const config = options.config ?? {}
+    if (config.includeNonSemantic !== undefined && typeof config.includeNonSemantic !== 'boolean') throw new DecisionError('invalid_request', 'includeNonSemantic must be boolean.')
+    if (config.candidateSelector !== undefined && (typeof config.candidateSelector !== 'string' || config.candidateSelector.trim() === '')) throw new DecisionError('invalid_request', 'candidateSelector must be a non-empty CSS selector.')
+    if (config.maxCandidates !== undefined && (!Number.isInteger(config.maxCandidates) || config.maxCandidates < 1 || config.maxCandidates > 64)) throw new DecisionError('invalid_request', 'maxCandidates must be an integer between 1 and 64.')
     this.#config = {
       strategy: config.strategy ?? 'form',
-      candidates: config.candidates,
+      ...config.candidates === undefined ? {} : { candidates: config.candidates },
       maxCandidates: config.maxCandidates ?? DEFAULT_MAX_CANDIDATES,
+      includeNonSemantic: config.includeNonSemantic ?? false,
+      ...config.candidateSelector === undefined ? {} : { candidateSelector: config.candidateSelector },
       maxStateChars: config.maxStateChars ?? DEFAULT_MAX_STATE_CHARS,
       maxObjectiveChars: config.maxObjectiveChars ?? DEFAULT_MAX_OBJECTIVE_CHARS,
       observeTimeoutMs: config.observeTimeoutMs ?? 90_000,
       executeTimeoutMs: config.executeTimeoutMs ?? 90_000,
     }
+  }
+
+  /** Task-local configuration; never mutates the registered adapter. */
+  withConfig(config: Pick<BrowserAdapterConfig, 'includeNonSemantic' | 'candidateSelector' | 'maxCandidates'>): BrowserEnvironmentAdapter {
+    return new BrowserEnvironmentAdapter({ id: this.id, dispatcher: this.#dispatcher, config: { ...this.#config, ...config } })
   }
 
   /**
@@ -140,7 +154,10 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
     void input
     const result = await this.#dispatcher.call({
       name: BROWSER_TOOLS.snapshot,
-      arguments: {},
+      arguments: {
+        ...this.#config.includeNonSemantic ? { includeNonSemantic: true } : {},
+        ...this.#config.candidateSelector === undefined ? {} : { candidateSelector: this.#config.candidateSelector },
+      },
       ...input?.signal === undefined ? {} : { signal: input.signal },
     })
     if (!result.ok) {
@@ -150,6 +167,11 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
       })
     }
     const snapshot = parseBrowserSnapshot(result.text)
+    if ((this.#config.includeNonSemantic || this.#config.candidateSelector !== undefined)
+      && (snapshot.inventoryScope?.includeNonSemantic !== this.#config.includeNonSemantic
+        || snapshot.inventoryScope?.candidateSelector !== this.#config.candidateSelector)) {
+      return failedObservation('browser', 'insufficient', 'The browser extension did not acknowledge the requested inventory scope. Upgrade the bridge/extension and retry; no unscoped action will be offered.')
+    }
     return this.#observationFrom(snapshot, result.text.length)
   }
 
@@ -189,6 +211,9 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
         name: item.name,
         ...item.disabled ? { disabled: true } : {},
         ...item.checked === undefined ? {} : { checked: item.checked },
+        ...item.selected === undefined ? {} : { selected: item.selected },
+        ...item.pressed === undefined ? {} : { pressed: item.pressed },
+        ...item.domClasses === undefined ? {} : { domClassesUntrusted: item.domClasses },
         ...item.href === undefined ? {} : { href: item.href },
       })),
       formFields: snapshot.forms.map(field => ({
@@ -376,6 +401,7 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
       if (item.role === 'input' && item.name.trim().toLowerCase() === 'file') fileIndexes.add(item.index)
     }
     const candidates: BrowserActionCandidate[] = []
+    const roles: readonly string[] = this.#config.includeNonSemantic ? [...PRIMARY_ROLES, 'clickable'] : PRIMARY_ROLES
     const seen = new Set<string>()
     const push = (candidate: BrowserActionCandidate): void => {
       if (candidates.length >= this.#config.maxCandidates) return
@@ -393,8 +419,8 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
     // first (a real control beats a form field), then enabled before disabled.
     // Array.prototype.sort is stable, so equal entries keep the page's order.
     const items = [...snapshot.items].sort((left, right) => {
-      const leftPrimary = (PRIMARY_ROLES as readonly string[]).includes(left.role) ? 0 : 1
-      const rightPrimary = (PRIMARY_ROLES as readonly string[]).includes(right.role) ? 0 : 1
+      const leftPrimary = roles.includes(left.role) ? 0 : 1
+      const rightPrimary = roles.includes(right.role) ? 0 : 1
       if (leftPrimary !== rightPrimary) return leftPrimary - rightPrimary
       if (left.disabled !== right.disabled) return left.disabled ? 1 : -1
       return 0
@@ -403,7 +429,7 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
     for (const item of items) {
       if (item.disabled) continue
       const role = item.role.toLowerCase()
-      if (!(PRIMARY_ROLES as readonly string[]).includes(role)) continue
+      if (!roles.includes(role)) continue
       const label = item.name === '' ? `element ${item.index}` : item.name
       if (role === 'checkbox' || role === 'radio') {
         push({

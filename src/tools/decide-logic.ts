@@ -29,6 +29,7 @@ import type { ExecutionMode, RuntimeOutcome } from '../runtime/runner.ts'
 import { DecisionError } from '../core/errors.ts'
 import type { DecisionEngineService } from '../service.ts'
 import { GATE_SKILL_NAMES } from '../gate.ts'
+import { BROWSER_OPTIONS_PARAMETER, taskEnvironment, type BrowserTaskOptions } from './browser-options.ts'
 
 /** Lossless-JSON object, matching what the tool output schema can carry. */
 type JsonObject = Record<string, JsonValue>
@@ -42,6 +43,7 @@ export interface DecideCandidateInput {
 
 /** The tool's arguments. */
 export interface DecideToolInput {
+  browser?: BrowserTaskOptions
   /** What the caller wants achieved. */
   objective?: string
   /** Environment state: a string, or a structured object. */
@@ -143,6 +145,7 @@ export function objectiveOf(input: DecideToolInput): Objective {
  */
 export function preflightDecideInput(input: DecideToolInput, service: DecisionEngineService): string | undefined {
   const hasEnvironment = typeof input.environment === 'string' && input.environment !== ''
+  if (!hasEnvironment && input.browser !== undefined) return 'Browser settings require a browser environment.'
   if (!hasEnvironment) {
     if (input.state === undefined) {
       return 'decision_decide: pass state, or pass environment to observe one.'
@@ -186,6 +189,7 @@ export function preflightDecideInput(input: DecideToolInput, service: DecisionEn
 
 /** The tool's model-facing parameter schema. */
 export const PARAMETERS = {
+  browser: BROWSER_OPTIONS_PARAMETER,
   objective: {
     type: 'string' as const,
     description: 'What the caller is trying to achieve. Prefer naming the concrete next outcome.',
@@ -362,7 +366,7 @@ export async function executeDecide(input: DecideToolInput, context: DecideToolC
   const environmentId = typeof input.environment === 'string' && input.environment !== '' ? input.environment : undefined
   if (environmentId !== undefined) {
     const outcome = await service.run({
-      environment: environmentId,
+      environment: taskEnvironment(service, environmentId, input.browser),
       objective: objectiveOf(input),
       mode,
       ...input.provider === undefined ? {} : { provider: input.provider },
@@ -376,6 +380,7 @@ export async function executeDecide(input: DecideToolInput, context: DecideToolC
     return projectOutcome(outcome)
   }
 
+  if (input.browser !== undefined) throw new DecisionError('invalid_request', 'Browser settings require a browser environment.')
   if (input.state === undefined) {
     throw new DecisionError('invalid_request', 'decision_decide needs state or environment.')
   }
