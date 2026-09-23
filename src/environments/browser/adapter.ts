@@ -384,12 +384,20 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
       candidates.push(candidate)
     }
 
+    // The bridge already ordered the inventory by what it knows about the page:
+    // an open dialog first, then what is inside the viewport, then the rest.
+    // Sorting by element index threw that away — the index is a stable
+    // numbering (≈ document order), so an off-screen control that merely
+    // appears early in the markup was offered before the control the user is
+    // looking at. Keep the bridge's order and only re-rank within it: role
+    // first (a real control beats a form field), then enabled before disabled.
+    // Array.prototype.sort is stable, so equal entries keep the page's order.
     const items = [...snapshot.items].sort((left, right) => {
       const leftPrimary = (PRIMARY_ROLES as readonly string[]).includes(left.role) ? 0 : 1
       const rightPrimary = (PRIMARY_ROLES as readonly string[]).includes(right.role) ? 0 : 1
       if (leftPrimary !== rightPrimary) return leftPrimary - rightPrimary
       if (left.disabled !== right.disabled) return left.disabled ? 1 : -1
-      return left.index - right.index
+      return 0
     })
 
     for (const item of items) {

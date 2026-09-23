@@ -177,6 +177,34 @@ describe('browser observation', () => {
     assert.ok(request.candidates.some(candidate => candidate.id === 'wait'))
   })
 
+  it('keeps the bridge\'s own ordering instead of re-sorting by element index', async () => {
+    // The bridge orders the inventory by what it knows: an open dialog first,
+    // then what is inside the viewport, then the rest. The element index is a
+    // stable numbering (≈ document order), so re-sorting by it silently
+    // discarded that knowledge and offered an off-screen control that merely
+    // appears early in the markup before the control on screen.
+    const text = [
+      'Title: Ordering',
+      'URL: https://example.test/order',
+      'Status: complete',
+      '',
+      'Main content:',
+      'An off-screen control comes first in the markup.',
+      '',
+      'Interactive elements:',
+      '  [7] button "Visible action"',
+      '  [3] button "Below the fold" [outside viewport]',
+    ].join('\n')
+    const adapter = new BrowserEnvironmentAdapter({
+      dispatcher: createMapDispatcher({ browser_snapshot: () => ({ ok: true, text }) }),
+    })
+    const request = adapter.buildDecisionRequest(await adapter.observe(), OBJECTIVE)
+    assert.deepEqual(
+      request.candidates.map(candidate => candidate.description),
+      ['Activate "Visible action"', 'Activate "Below the fold"'],
+    )
+  })
+
   it('never offers a file input as a candidate, in either rendering', async () => {
     // The bridge keeps file inputs in the inventory on purpose (CDP needs the
     // index), and their role is not a primary role, so the path that reaches
