@@ -150,17 +150,22 @@ export function parseBrowserSnapshot(text: string): BrowserSnapshot {
       const label = sectionMatch[1] ?? ''
       const rest = (sectionMatch[2] ?? '').trim()
       if (label === 'Title') {
-        if (rest !== '') snapshot.title = rest
+        // First one wins. The bridge appends per-frame sections after the page
+        // (`--- iframe frame=7 … ---` + that frame's own `Title:`/`URL:`), so a
+        // later header would otherwise relabel the whole state: a page driven
+        // inside a Chrome warm-up iframe reported `title: "Warmup Page"` and a
+        // google.com URL while the controlled page was a quiz.
+        if (rest !== '' && snapshot.title === undefined) snapshot.title = rest
         section = 'header'
         continue
       }
       if (label === 'URL') {
-        if (rest !== '') snapshot.url = rest
+        if (rest !== '' && snapshot.url === undefined) snapshot.url = rest
         section = 'header'
         continue
       }
       if (label === 'Status') {
-        if (rest !== '') snapshot.status = rest
+        if (rest !== '' && snapshot.status === undefined) snapshot.status = rest
         if (rest.includes('reassigned')) snapshot.reindexed = true
         section = 'header'
         continue

@@ -93,6 +93,35 @@ describe('browser snapshot parsing', () => {
     assert.equal(snapshot.items.length, 1)
   })
 
+  it('keeps the page header when a later frame section repeats it', () => {
+    // The bridge appends one section per frame after the page, and each frame
+    // carries its own `Title:`/`URL:`. A later header used to overwrite the
+    // page's, so a driven page reported the title and URL of an unrelated
+    // iframe (`Warmup Page` on google.com while the controlled tab was a quiz).
+    const snapshot = parseBrowserSnapshot([
+      'Title: 📝 在线刷题',
+      'URL: https://n-ooob.github.io/choice-quiz/',
+      'Status: complete',
+      '',
+      'Main content:',
+      '第 1 题',
+      '',
+      'Interactive elements:',
+      '  [1] button "下一题"',
+      '',
+      '--- iframe frame=47 parent=-1 origin=https://www.google.com ---',
+      'Title: Warmup Page',
+      'URL: https://www.google.com/search/warmup.html',
+      'Status: complete',
+      '',
+      'Main content:',
+      'a a a a a',
+    ].join('\n'))
+    assert.equal(snapshot.title, '📝 在线刷题')
+    assert.equal(snapshot.url, 'https://n-ooob.github.io/choice-quiz/')
+    assert.equal(snapshot.items.length, 1)
+  })
+
   it('keeps unrecognized lines visible instead of dropping them silently', () => {
     const snapshot = parseBrowserSnapshot('Title: x\nSomething entirely new: 42')
     assert.ok(snapshot.unparsed.some(line => line.includes('Something entirely new')))
@@ -146,6 +175,47 @@ describe('browser observation', () => {
     const adapter = new BrowserEnvironmentAdapter({ dispatcher: page.dispatcher() })
     const request = adapter.buildDecisionRequest(await adapter.observe(), OBJECTIVE)
     assert.ok(request.candidates.some(candidate => candidate.id === 'wait'))
+  })
+
+  it('never offers a file input as a candidate, in either rendering', async () => {
+    // The bridge keeps file inputs in the inventory on purpose (CDP needs the
+    // index), and their role is not a primary role, so the path that reaches
+    // the model is the form-field branch. Activating a file input opens a
+    // native dialog this layer cannot drive, and a disabled one emits nothing:
+    // a candidate that cannot move the page is a trap the provider answers
+    // forever. Measured on a real quiz page: 12/12 sampled clicks hit the
+    // hidden file input through its form candidate, for zero progress.
+    const unlabelled = [
+      'Title: Upload', 'URL: https://example.test/upload', 'Status: complete', '',
+      'Main content:', 'Choose a file.', '',
+      'Interactive elements:',
+      '  [1] button "Submit"',
+      '  [3] input "file"', '',
+      'Form fields:',
+      // Identity omitted: the item line above already rendered this index.
+      '  [3] value=""',
+    ].join('\n')
+    const labelled = [
+      'Title: Upload', 'URL: https://example.test/upload', 'Status: complete', '',
+      'Main content:', 'Choose a file.', '',
+      'Interactive elements:',
+      '  [1] button "Submit"', '',
+      'Form fields:',
+      '  [5] 上传题库 (file) value=""',
+    ].join('\n')
+
+    for (const [name, text, fieldIndex] of [['unlabelled', unlabelled, 3], ['labelled', labelled, 5]] as const) {
+      const adapter = new BrowserEnvironmentAdapter({
+        dispatcher: createMapDispatcher({ browser_snapshot: () => ({ ok: true, text }) }),
+      })
+      const request = adapter.buildDecisionRequest(await adapter.observe(), OBJECTIVE)
+      assert.equal(
+        request.candidates.some(candidate => (candidate.metadata as { index?: number } | undefined)?.index === fieldIndex),
+        false,
+        `${name} file input must not be a candidate`,
+      )
+      assert.ok(request.candidates.some(candidate => /Submit/.test(candidate.description)), `${name} keeps the real button`)
+    }
   })
 
   it('reports unsupported when the session capability refuses the snapshot', async () => {

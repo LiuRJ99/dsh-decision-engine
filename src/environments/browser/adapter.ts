@@ -359,6 +359,22 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
       const patched = this.#config.candidates ?? []
       return patched.slice(0, this.#config.maxCandidates)
     }
+    // Upload controls are never candidates. Activating a file input opens a
+    // native file dialog this layer cannot drive, and a disabled one produces
+    // no event at all — a candidate that cannot move the page is a trap: the
+    // provider answers it again on every step and the run spends its whole
+    // budget there. Measured on a real quiz page: 12/12 sampled clicks landed
+    // on the hidden file input through its form candidate, with zero progress.
+    // File inputs are not primary-role items, so the form branch is the path
+    // that reaches the model; both renderings must be recognised, because the
+    // bridge omits a field's kind when its identity was already rendered with
+    // the matching inventory item.
+    const fileIndexes = new Set<number>()
+    for (const field of snapshot.forms) if (field.kind === 'file') fileIndexes.add(field.index)
+    for (const item of snapshot.items) {
+      if (item.role === 'file') fileIndexes.add(item.index)
+      if (item.role === 'input' && item.name.trim().toLowerCase() === 'file') fileIndexes.add(item.index)
+    }
     const candidates: BrowserActionCandidate[] = []
     const seen = new Set<string>()
     const push = (candidate: BrowserActionCandidate): void => {
@@ -401,6 +417,7 @@ export class BrowserEnvironmentAdapter implements EnvironmentAdapter {
     for (const field of snapshot.forms) {
       const label = field.label ?? `field ${field.index}`
       if (field.checked !== undefined) continue
+      if (fileIndexes.has(field.index)) continue
       if (field.value !== undefined && field.value !== '' && field.masked !== true) {
         push({
           id: `clear-${slug(label)}-${field.index}`,
