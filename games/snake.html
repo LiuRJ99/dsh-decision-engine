@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>贪吃蛇 · 决策层</title>
+    <link rel="stylesheet" href="/style.css" />
+    <style>
+      /* 本页专属的几处小样式（原 style.css 不含） */
+      .bridge-note { color: var(--muted, #8b93a1); font-size: 13px; line-height: 1.6; }
+      .rank-list { margin: 6px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.7; }
+      .rank-list .chosen { color: #7dd3fc; font-weight: 600; }
+      .engine-tag { display: inline-block; padding: 1px 8px; border-radius: 999px; background: #1e2430; font-size: 12px; color: #93c5fd; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <h1>🐍 贪吃蛇 <small>局面由桥持有；决策层选策略，本地按策略执行</small></h1>
+        <div class="pill-row">
+          <a class="badge" href="/">← 大厅</a>
+          <a class="badge" href="/tetris.html">🧱 俄罗斯方块</a>
+          <span id="health" class="badge">检查桥…</span>
+        </div>
+      </header>
+
+      <div class="layout" id="layout">
+        <div>
+          <div class="card">
+            <div class="board-only">
+              <canvas id="board" width="640" height="640"></canvas>
+            </div>
+            <div class="hud">
+              <div class="stat"><b id="score">0</b><span>分数</span></div>
+              <div class="stat"><b id="length">3</b><span>长度</span></div>
+              <div class="stat"><b id="steps">0</b><span>步数</span></div>
+              <div class="stat"><b id="time">0s</b><span>用时</span></div>
+              <div class="stat"><b id="latency">-</b><span>决策延迟</span></div>
+              <div class="stat"><b id="lag">0</b><span>局面版本</span></div>
+            </div>
+            <div class="toolbar">
+              <button id="play" class="primary">开始</button>
+              <button id="reset">重来</button>
+              <button id="toggle-board">隐藏棋盘</button>
+              <span class="muted">操作</span>
+              <button class="mode active" data-mode="human">人类</button>
+              <button class="mode" data-mode="auto">本地启发式自动走</button>
+              <span class="muted">难度</span>
+              <select id="difficulty" title="按游戏规则加压：障碍物 / 场地收缩 / 加速 / 食物过期">
+                <option value="easy">简单（无障碍）</option>
+                <option value="normal" selected>普通（障碍+收缩）</option>
+                <option value="hard">困难（更快、缩得更快）</option>
+                <option value="extreme">极限（食物会过期）</option>
+              </select>
+              <span class="muted">节奏</span>
+              <input id="speed" type="range" min="0" max="400" step="10" value="120" />
+              <span class="mono muted" id="speed-label">120ms</span>
+            </div>
+            <div class="note">
+              <b>这个页面不持状态。</b>权威局面在桥进程里（<code>/state</code>、<code>/action</code>），
+              页面只做两件事：把局面画出来、把你的输入发回去。
+              <br />
+              · <b>人类</b>：方向键 / WASD 走一步，空格暂停。
+              · <b>本地启发式自动走</b>：页面用本地规则自己发动作，不为决策层服务，只是方便你看。
+              · <b>让决策层玩</b>：不要开上面两个，由主 Agent 调 <code>decision_run</code> 指向这个桥。
+              决策层每次只做一个决定 —— <b>从四个策略里选一个</b>（追食物 / 保活 / 贴尾巴 / 直走），
+              桥按该策略连走 8 步，然后再问它一次。这样它做的是自己擅长的"四选一"，
+              而"每一步具体怎么走"由确定性代码保证。
+            </div>
+          </div>
+        </div>
+
+        <div class="panels">
+          <div class="panel-col">
+          <div class="card">
+            <h2>局面与桥</h2>
+            <div class="kv">
+              <span>难度</span><span id="difficulty-label">-</span>
+              <span>随机种子</span><span class="mono" id="seed-label">-</span>
+              <span>桥地址</span><span class="mono" id="bridge-label">-</span>
+              <span>局面版本</span><span class="mono" id="rev-label">0</span>
+              <span>本局动作数</span><span class="mono" id="mix">0</span>
+              <span>决策粒度</span><span class="mono" id="granularity">-</span>
+              <span>状态</span><span id="mode-label">人类</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>计分器</h2>
+            <div class="kv">
+              <span>奖励总分</span><span class="mono" id="reward-total">0</span>
+              <span>吃到食物</span><span class="mono" id="reward-food">0</span>
+              <span>步数扣分</span><span class="mono" id="reward-steps">0</span>
+              <span>死亡罚分</span><span class="mono" id="reward-death">0</span>
+            </div>
+            <div class="note">奖励口径：吃到食物 +10，每步 −0.1，游戏结束 −100。</div>
+            <div class="note" id="experience" style="color: var(--accent)"></div>
+          </div>
+          </div>
+
+          <div class="panel-col">
+          <div class="card">
+            <h2>最近一次落子</h2>
+            <div id="decision-action" class="mono">还没有落子</div>
+            <div class="note">决策层收到的是下面这份候选集，它从中选一个 id 返回。候选描述里带的是<b>真实局面事实</b>，模型据此判断。</div>
+            <ol class="rank-list" id="decision-bars"></ol>
+            <div class="kv" style="margin-top: 10px">
+              <span>选中项排名</span><span id="decision-top">-</span>
+              <span>决策延迟</span><span id="decision-risk">-</span>
+              <span>候选数</span><span id="decision-noul">-</span>
+              <span>执行结果</span><span id="decision-fallback">-</span>
+            </div>
+            <div class="note" id="decision-situation"></div>
+          </div>
+
+          <div class="card">
+            <h2>浏览器记录（最高分）</h2>
+            <div id="records"></div>
+            <div class="toolbar">
+              <button id="recent-toggle">看最近 8 局</button>
+            </div>
+            <div class="note" id="records-note"></div>
+          </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      // 游戏规则是本地模块（与桥共用同一份 core/，所以纯函数不会漂移）
+      import { snakeHeuristicAction, snakeFacts } from "/js/snake-core.js";
+      import { addRecord, sessionLesson } from "/js/records.js";
+      import { renderRecords as renderRecordsList } from "/js/ui.js";
+      import { sessionLessonZh, zhCause, zhSnakeSituation } from "/js/zh.js";
+
+      // ------------------------------------------------------------------ 配置
+      const params = new URLSearchParams(location.search);
+      // 桥的地址：默认就是"打开这个页面的那个 origin"（桥同时服务页面和协议端点）
+      const BRIDGE = params.get("bridge") ?? location.origin;
+      const POLL_MS = Number(params.get("poll") ?? 150);
+
+      // ------------------------------------------------------------------ 元素
+      const canvas = document.getElementById("board");
+      const ctx = canvas.getContext("2d");
+      const els = {
+        score: document.getElementById("score"),
+        length: document.getElementById("length"),
+        steps: document.getElementById("steps"),
+        time: document.getElementById("time"),
+        latency: document.getElementById("latency"),
+        lag: document.getElementById("lag"),
+        speed: document.getElementById("speed"),
+        difficulty: document.getElementById("difficulty"),
+        toggleBoard: document.getElementById("toggle-board"),
+        speedLabel: document.getElementById("speed-label"),
+        play: document.getElementById("play"),
+        reset: document.getElementById("reset"),
+        modeLabel: document.getElementById("mode-label"),
+        granularity: document.getElementById("granularity"),
+        mix: document.getElementById("mix"),
+        action: document.getElementById("decision-action"),
+        bars: document.getElementById("decision-bars"),
+        noul: document.getElementById("decision-noul"),
+        risk: document.getElementById("decision-risk"),
+        top: document.getElementById("decision-top"),
+        fallback: document.getElementById("decision-fallback"),
+        situation: document.getElementById("decision-situation"),
+        rewardTotal: document.getElementById("reward-total"),
+        rewardFood: document.getElementById("reward-food"),
+        rewardSteps: document.getElementById("reward-steps"),
+        rewardDeath: document.getElementById("reward-death"),
+        experience: document.getElementById("experience"),
+        difficultyLabel: document.getElementById("difficulty-label"),
+        seedLabel: document.getElementById("seed-label"),
+        bridgeLabel: document.getElementById("bridge-label"),
+        revLabel: document.getElementById("rev-label"),
+        health: document.getElementById("health"),
+        records: document.getElementById("records"),
+        recordsNote: document.getElementById("records-note"),
+        recentToggle: document.getElementById("recent-toggle"),
+      };
+
+      // ------------------------------------------------------------------ 状态
+      let view = null;              // 最近一次从桥读到的画面
+      let opMode = "human";         // human | auto（本地启发式）
+      let paused = false;
+      let autoBusy = false;         // 本地自动模式：一次只有一个动作在飞
+      let actionInFlight = false;   // 人类按键：一次只有一个动作在飞（防重复提交）
+      let showRecent = false;
+      let startedAt = 0;
+      let elapsedMs = 0;
+      let lastMoveSeen = null;      // 用于识别"这一版是决策层落的子"
+      let recordedRevision = -1;
+      let sessionExperience = null;
+      const t0 = Date.now();
+
+      // ------------------------------------------------------------------ 与桥通信
+      async function bridgeFetch(path, init) {
+        const res = await fetch(BRIDGE + path, { cache: "no-store", ...(init ?? {}) });
+        if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
+        return await res.json();
+      }
+
+      async function postAction(candidateId) {
+        const snap = await bridgeFetch("/state");
+        return await bridgeFetch("/action", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            protocol: "dsh-environment/v1",
+            actionId: `page-${Date.now()}`,
+            environmentId: snap.environmentId,
+            episodeId: snap.episodeId,
+            revision: snap.revision,
+            candidateId,
+          }),
+        });
+      }
+
+      async function resetEpisode() {
+        await bridgeFetch("/reset", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ difficulty: els.difficulty.value }),
+        });
+        startedAt = Date.now();
+        elapsedMs = 0;
+        recordedRevision = -1;
+        lastMoveSeen = null;
+      }
+
+      // ------------------------------------------------------------------ 绘制
+      function draw(raw, done) {
+        const n = raw.size;
+        const pad = 2;
+        const cell = (canvas.width - pad * 2) / n;
+        ctx.fillStyle = "#151922";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#3f4756";
+        for (const o of raw.obstacles ?? []) ctx.fillRect(pad + o.x * cell + 1, pad + o.y * cell + 1, cell - 2, cell - 2);
+
+        if (raw.food) {
+          ctx.fillStyle = "#f87171";
+          ctx.beginPath();
+          ctx.arc(pad + raw.food.x * cell + cell / 2, pad + raw.food.y * cell + cell / 2, Math.max(2, cell * 0.32), 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        raw.snake.forEach((s, i) => {
+          ctx.fillStyle = i === 0 ? "#7dd3fc" : done ? "#64748b" : "#4ade80";
+          ctx.fillRect(pad + s.x * cell + 1, pad + s.y * cell + 1, cell - 2, cell - 2);
+        });
+      }
+
+      // ------------------------------------------------------------------ 面板渲染
+      function renderLatestMove(v) {
+        const m = v.lastMove;
+        if (!m) {
+          els.action.textContent = "还没有落子";
+          els.bars.innerHTML = "";
+          els.top.textContent = "-";
+          els.risk.textContent = "-";
+          els.noul.textContent = "-";
+          els.fallback.textContent = "-";
+          els.situation.textContent = "";
+          return;
+        }
+        els.action.textContent = `选中 ${m.candidateId}`;
+        els.bars.innerHTML = "";
+        for (const c of m.offered) {
+          const li = document.createElement("li");
+          const chosen = c.id === m.candidateId;
+          if (chosen) li.className = "chosen";
+          li.textContent = `${c.id} — ${c.description}${chosen ? "　★ 选中" : ""}`;
+          els.bars.appendChild(li);
+        }
+        els.top.textContent = m.rankIndex >= 0 ? `第 ${m.rankIndex + 1} / ${m.offered.length}` : "-";
+        // 桥记录的是"距上一次落子的间隔"，决策层驱动时它约等于一次决策的墙钟耗时
+        els.risk.textContent = v.lastGapMs != null ? `${v.lastGapMs}ms` : "-";
+        els.noul.textContent = String(m.offered.length);
+        // 决策层选的是策略，本地按策略执行 —— 两件事分开写清楚
+        els.fallback.textContent = `${m.candidateId} → 已执行`;
+        els.situation.textContent = zhSnakeSituation?.(v.raw) ?? "";
+      }
+
+      function renderRecords() {
+        // 签名：renderRecords(el, game, { limit, recent })
+        renderRecordsList(els.records, "snake", { limit: 8, recent: showRecent });
+        els.recordsNote.textContent = showRecent ? "显示最近 8 局" : "显示最高分（按分数排序）";
+      }
+
+      function recordIfFinished(v) {
+        if (!v.done || v.revision === recordedRevision) return;
+        recordedRevision = v.revision;
+        const r = v.result ?? {};
+        addRecord("snake", {
+          game: "snake",
+          engine: "decision-layer",
+          mode: opMode,
+          strategy: null,
+          score: r.score ?? 0,
+          difficulty: v.difficulty,
+          detail: `${r.length ?? 0} 长 / ${r.steps ?? 0} 步 / ${zhCause(r.cause)}`,
+        });
+        // 签名：sessionLesson(game) / sessionLessonZh(game)
+        sessionExperience = sessionLesson("snake");
+        els.experience.textContent = sessionExperience ? sessionLessonZh("snake") : "";
+        renderRecords();
+      }
+
+      // ------------------------------------------------------------------ 主循环
+      function paint(v) {
+        draw(v.raw, v.done);
+
+        els.score.textContent = v.raw.score;
+        els.length.textContent = v.raw.snake.length;
+        els.steps.textContent = v.raw.steps;
+        const secs = Math.floor((elapsedMs || (Date.now() - t0)) / 1000);
+        els.time.textContent = `${secs}s`;
+        els.lag.textContent = v.revision;
+        els.revLabel.textContent = v.revision;
+        els.mix.textContent = v.decisions;
+        els.granularity.textContent = v.granularity ?? "-";
+        // 难度直接显示桥给的取值（zhLabel 是"策略/动作"词表，不适用难度）
+        els.difficultyLabel.textContent = v.difficulty;
+        els.seedLabel.textContent = v.seed;
+
+        // 奖励面板：桥算好的口径
+        const rw = v.reward ?? { total: 0, food: 0, steps: 0, death: 0 };
+        els.rewardTotal.textContent = rw.total.toFixed(1);
+        els.rewardFood.textContent = rw.food;
+        els.rewardSteps.textContent = rw.steps.toFixed(1);
+        els.rewardDeath.textContent = rw.death;
+
+        renderLatestMove(v);
+        els.modeLabel.textContent = v.done ? "已结束" : opMode === "auto" ? "本地自动" : "等待输入";
+        els.play.textContent = v.done ? "再来一局" : paused ? "继续" : v.decisions > 0 ? "暂停" : "开始";
+        recordIfFinished(v);
+      }
+
+      async function poll() {
+        try {
+          const v = await bridgeFetch("/render");
+          view = v;
+          // 决策层落子时，桥知道延迟；这里把最近一次动作的结果贴上去
+          if (v.lastMove && v.lastMove.candidateId !== lastMoveSeen) {
+            lastMoveSeen = v.lastMove.candidateId;
+            v.lastMessage = view.lastMessage;
+          }
+          els.health.textContent = "桥已连接";
+          els.health.style.color = "#4ade80";
+          paint(v);
+        } catch (err) {
+          els.health.textContent = "桥不可达";
+          els.health.style.color = "#f87171";
+        }
+      }
+
+      /** 本地自动模式：页面自己用启发式发动作（不经过决策层）。 */
+      async function autoStep() {
+        if (opMode !== "auto" || paused || autoBusy || !view || view.done) return;
+        autoBusy = true;
+        try {
+          const best = snakeHeuristicAction(view.raw, snakeFacts(view.raw));
+          if (best?.action) await postAction(`dir:${best.action}`);
+        } catch { /* 下个周期重试 */ } finally {
+          autoBusy = false;
+        }
+      }
+
+      // ------------------------------------------------------------------ 输入
+      const KEY_DIR = {
+        ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+        w: "up", s: "down", a: "left", d: "right", W: "up", S: "down", A: "left", D: "right",
+      };
+      document.addEventListener("keydown", async (e) => {
+        // 空格无条件吞掉：游戏页的常规防御 —— 按钮持有焦点时，按空格的默认行为
+        // 是"点击那个按钮"，玩游戏时会误触界面控件。方向键同理，避免页面滚动/焦点切换。
+        const tag = (e.target?.tagName ?? "").toLowerCase();
+        const inField = tag === "input" || tag === "select" || tag === "textarea";
+        if (e.key === " " && !inField) {
+          e.preventDefault();
+          paused = !paused;
+          els.play.textContent = paused ? "继续" : "暂停";
+          return;
+        }
+        const dir = KEY_DIR[e.key];
+        if (!dir || opMode !== "human" || paused || !view || view.done) return;
+        e.preventDefault();
+        if (actionInFlight) return;
+        actionInFlight = true;
+        try { await postAction(`dir:${dir}`); } catch { /* 忽略：下一帧会同步 */ } finally {
+          actionInFlight = false;
+        }
+      });
+
+      for (const btn of document.querySelectorAll(".mode")) {
+        btn.addEventListener("click", () => {
+          opMode = btn.dataset.mode;
+          for (const b of document.querySelectorAll(".mode")) b.classList.toggle("active", b === btn);
+        });
+      }
+
+      els.play.addEventListener("click", async () => {
+        if (view?.done) { await resetEpisode(); paused = false; return; }
+        paused = !paused;
+        els.play.textContent = paused ? "继续" : "暂停";
+      });
+      els.reset.addEventListener("click", resetEpisode);
+      els.difficulty.addEventListener("change", resetEpisode);
+      els.speed.addEventListener("input", () => {
+        els.speedLabel.textContent = `${els.speed.value}ms`;
+      });
+      els.toggleBoard.addEventListener("click", () => {
+        // 真实类名是 .layout.board-hidden（见 style.css），不是自定义的 hide-board
+        const hidden = document.getElementById("layout").classList.toggle("board-hidden");
+        els.toggleBoard.textContent = hidden ? "显示棋盘" : "隐藏棋盘";
+        localStorage.setItem("dsh-decision-engine.ui.snake.boardHidden", hidden ? "1" : "0");
+      });
+      els.recentToggle.addEventListener("click", () => {
+        showRecent = !showRecent;
+        els.recentToggle.textContent = showRecent ? "看最高分" : "看最近 8 局";
+        renderRecords();
+      });
+
+      // ------------------------------------------------------------------ 启动
+      els.bridgeLabel.textContent = BRIDGE;
+      els.speedLabel.textContent = `${els.speed.value}ms`;
+      els.difficulty.value = params.get("difficulty") ?? "normal";
+      // 棋盘显隐记忆：?hide=1/0 优先，其次是上次的选择
+      const hideParam = params.get("hide");
+      const hideInit = hideParam === "1" ? true : hideParam === "0" ? false : localStorage.getItem("dsh-decision-engine.ui.snake.boardHidden") === "1";
+      if (hideInit) {
+        document.getElementById("layout").classList.add("board-hidden");
+        els.toggleBoard.textContent = "显示棋盘";
+      }
+      renderRecords();
+      poll();
+      setInterval(poll, POLL_MS);
+      setInterval(autoStep, Math.max(30, Number(els.speed.value)));
+      setInterval(() => { elapsedMs = Date.now() - t0; }, 1000);
+    </script>
+  </body>
+</html>

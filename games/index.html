@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dsh-decision-engine · games 大厅</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <h1>dsh-decision-engine <small>让决策层在真实页面上玩游戏</small></h1>
+        <div class="pill-row">
+          <span id="health" class="badge">检查桥…</span>
+          <a class="badge" href="/health" target="_blank">桥状态（协议接口）</a>
+        </div>
+      </header>
+
+      <div class="cards">
+        <a class="game-link" href="/snake.html">
+          <h3>🐍 贪吃蛇</h3>
+          <p>
+            人类用方向键玩。<b>让决策层玩</b>时，每一步它拿到的是<b>局面报告 + 有限候选</b>
+            （7×7 局部视野、朝向、食物相对偏移与距离、可达空格数），
+            <b>从四个策略里选一个</b>（追食物 / 保活 / 贴尾巴 / 直走），桥按该策略连走 8 步再问一次；
+            每一步具体怎么走由确定性代码保证。页面只负责把局面画出来、把动作发回桥。
+          </p>
+          <div class="pill-row">
+            <span class="badge">策略四选一</span>
+            <span class="badge">候选带真实后果</span>
+            <span class="badge">+10 / 食物，−100 / 结束</span>
+          </div>
+          <div class="note" id="snake-summary">暂无记录</div>
+        </a>
+
+        <a class="game-link" href="/tetris.html">
+          <h3>🧱 俄罗斯方块</h3>
+          <p>
+            人类正常操作。<b>让决策层玩</b>时，它拿到的是<b>盘面报告 + 有限落点候选</b>
+            （裁剪过的堆叠行、每列高度、空洞数、当前块与下一块），
+            <b>从四个策略里选一个</b>（消行 / 补洞 / 平整 / 压低）；放到哪一列由本地算法按该策略算。
+          </p>
+          <div class="pill-row">
+            <span class="badge">策略四选一</span>
+            <span class="badge">候选带落点后果</span>
+            <span class="badge">+100 / 消行，−1000 / 顶死</span>
+          </div>
+          <div class="note" id="tetris-summary">暂无记录</div>
+        </a>
+      </div>
+
+      <div class="card" style="margin-top: 18px">
+        <h2>难度档一览（点档位名 → 直接用该难度开局）</h2>
+        <div class="cards difficulty-grid">
+          <div>
+            <h3 style="margin: 0 0 8px">🐍 贪吃蛇</h3>
+            <table>
+              <thead><tr><th>档位</th><th>规则</th><th>实测存活</th><th>本机最好</th></tr></thead>
+              <tbody>
+                <tr><td><a href="/snake.html?difficulty=easy">简单</a></td><td class="wrap">无障碍、不加速</td><td>800 步（上限，死不了）</td><td id="best-snake-easy">-</td></tr>
+                <tr><td><a href="/snake.html?difficulty=normal">普通</a></td><td class="wrap">8 块障碍；每 12 个食物收 1 圈；每 8 个食物加速</td><td>800 步（上限，但分数下降）</td><td id="best-snake-normal">-</td></tr>
+                <tr><td><a href="/snake.html?difficulty=hard">困难</a></td><td class="wrap">12 块障碍；每 8 个食物收 1 圈；每 5 个加速；食物 200 步过期</td><td><b>≈463 步就死</b>（撞障碍）</td><td id="best-snake-hard">-</td></tr>
+                <tr><td><a href="/snake.html?difficulty=extreme">极限</a></td><td class="wrap">12 块障碍；每 5 个食物收 1 圈；每 3 个加速；食物 120 步过期</td><td><b>≈400 步就死</b>（把自己困死）</td><td id="best-snake-extreme">-</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <h3 style="margin: 0 0 8px">🧱 俄罗斯方块</h3>
+            <table>
+              <thead><tr><th>档位</th><th>规则</th><th>实测存活</th><th>本机最好</th></tr></thead>
+              <tbody>
+                <tr><td><a href="/tetris.html?difficulty=easy">简单</a></td><td class="wrap">空盘，7 种方块</td><td>500+ 块（上限，死不了）</td><td id="best-tetris-easy">-</td></tr>
+                <tr><td><a href="/tetris.html?difficulty=normal">普通</a></td><td class="wrap">开局垫 4 行垃圾；每 12 块涨 1 行垃圾</td><td>≈383 块</td><td id="best-tetris-normal">-</td></tr>
+                <tr><td><a href="/tetris.html?difficulty=hard">困难</a></td><td class="wrap">开局垫 4 行垃圾；<b>每 6 块</b>涨 1 行垃圾</td><td><b>≈148 块</b></td><td id="best-tetris-hard">-</td></tr>
+                <tr><td><a href="/tetris.html?difficulty=extreme">极限</a></td><td class="wrap">每 6 块涨 1 行垃圾，并且<b>只发 S/Z 方块</b></td><td><b>≈43 块</b></td><td id="best-tetris-extreme">-</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="note">
+          「实测存活」= 用启发式执行器（不调模型）跑出来的平均成绩，也就是 NPC 在地板级参考；本机 = Apple M4。
+          难度规则<b>人机通用</b>：蛇的障碍物/场地收缩/加速/食物过期、方块的垃圾行与 S/Z 专用，都是游戏本身的规则。
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 18px">
+        <h2>浏览器里的游戏记录（localStorage）</h2>
+        <div class="cards">
+          <div>
+            <h2 style="margin-bottom: 6px">贪吃蛇 · 最高分</h2>
+            <div id="snake-best"></div>
+          </div>
+          <div>
+            <h2 style="margin-bottom: 6px">俄罗斯方块 · 最高分</h2>
+            <div id="tetris-best"></div>
+          </div>
+        </div>
+        <div class="toolbar" style="margin-top: 14px">
+          <button id="export">导出全部记录 JSON</button>
+          <button id="clear" class="danger">清空记录</button>
+          <span class="muted" id="store-info"></span>
+        </div>
+        <h2 style="margin-top: 16px">最近对局</h2>
+        <div id="recent"></div>
+      </div>
+
+      <div class="card">
+        <h2>页面上的模式</h2>
+        <div class="kv">
+          <span>人类</span><span>键盘操作；动作经 <code>POST /action</code> 交给桥执行，记录同样进榜。</span>
+          <span>本地启发式自动</span><span>纯本地规则，页面自己发落点，<b>不经过决策层</b>：贪吃蛇 = 洪水填充保活 + 贪心靠近食物；方块 = Dellacherie 评分（业界经典权重）。用来对照和离线查看。</span>
+          <span>决策层驱动</span><span><b>真正的玩法</b>：主 Agent 调 <code>decision_run</code> 把 <code>endpoint</code> 指向桥。桥持有权威局面，每次把<b>结构化局面 + 四个策略候选</b>交给决策模型，模型选一个策略，桥按该策略执行（蛇连走 8 步 / 方块算一个落点），然后再问一次。页面不参与决策，只渲染。</span>
+        </div>
+        <div class="note">
+          实测（本机，同一种子）：<b>决策粒度决定成绩</b>。
+          让模型逐步选方向/落点 → 贪吃蛇 16 步 0 分就撞死、方块 600 分消 5 行就顶死；
+          让它只选策略、本地算走法 → 贪吃蛇 <b>12 分 / 166 步 / 长度 15</b>、
+          方块 <b>55400 分 / 消 95 行 / 200 块没死</b>。
+          这是 System-1 决策模型：擅长"从有限选项里选一个"，不擅长逐步决策，所以桥固定用策略粒度。
+          页面上的「最近一次落子」会显示它选了四个策略里的第几个，可以自己看。
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import { bestByDifficulty, clearAll, exportAll, loadAll } from "/js/records.js";
+      import { renderRecords, renderSummaryLine } from "/js/ui.js";
+
+      // 桥状态：直接问 /health（原来的 /api/health 是 laya-router 服务端的，已经不存在）
+      (async () => {
+        const el = document.getElementById("health");
+        try {
+          const h = await (await fetch("/health", { cache: "no-store" })).json();
+          el.textContent = `桥已连接 · ${h.game} · rev ${h.revision}${h.done ? " · 已结束" : ""}`;
+          el.style.color = "#4ade80";
+        } catch {
+          el.textContent = "桥不可达";
+          el.style.color = "#f87171";
+        }
+      })();
+      for (const game of ["snake", "tetris"]) {
+        renderSummaryLine(document.getElementById(`${game}-summary`), game);
+        renderRecords(document.getElementById(`${game}-best`), game, { limit: 6 });
+      }
+      // 按难度填"本机最好"
+      for (const game of ["snake", "tetris"]) {
+        const best = bestByDifficulty(game);
+        for (const level of ["easy", "normal", "hard", "extreme"]) {
+          const el = document.getElementById(`best-${game}-${level}`);
+          if (el) el.textContent = best[level] == null ? "暂无" : `${best[level]}${game === "snake" ? " 分" : " 分"}`;
+        }
+      }
+
+      const all = loadAll();
+      renderRecords(document.getElementById("recent"), "snake", { limit: 5, recent: true });
+      const info = document.getElementById("store-info");
+      info.textContent = `当前存储：贪吃蛇 ${all.snake.length} 条 / 方块 ${all.tetris.length} 条`;
+
+      document.getElementById("export").addEventListener("click", () => {
+        const blob = new Blob([exportAll()], { type: "application/json" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `games-records-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      });
+
+      document.getElementById("clear").addEventListener("click", () => {
+        if (confirm("确定清空浏览器里的全部游戏记录？")) {
+          clearAll();
+          location.reload();
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,540 @@
+:root {
+  --bg: #0f1116;
+  --panel: #171a21;
+  --panel-2: #1f232c;
+  --line: #2b3140;
+  --text: #e6e9ef;
+  --muted: #98a2b3;
+  --accent: #4dd0e1;
+  --accent-2: #a78bfa;
+  --good: #81c784;
+  --warn: #ffb74d;
+  --bad: #e57373;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(1200px 600px at 20% -10%, #1b2030 0%, var(--bg) 60%);
+  color: var(--text);
+  font: 14px/1.55 -apple-system, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  min-height: 100vh;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 22px 20px 60px;
+}
+
+header.top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-size: 20px;
+  margin: 0;
+  letter-spacing: 0.3px;
+}
+
+h1 small {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 13px;
+  margin-left: 8px;
+}
+
+h2 {
+  font-size: 14px;
+  margin: 0 0 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) 360px;
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.card + .card {
+  margin-top: 14px;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #0b0d12;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  image-rendering: pixelated;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0;
+}
+
+button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #3d465c;
+}
+
+button.primary {
+  background: linear-gradient(180deg, #2b6cb0, #245a92);
+  border-color: #2f6fb5;
+}
+
+button.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button.danger {
+  color: var(--bad);
+}
+
+select,
+input[type="range"] {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font: inherit;
+}
+
+.hud {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.hud .stat {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 8px 10px;
+}
+
+.hud .stat b {
+  display: block;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.hud .stat span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+}
+
+.badge.ok {
+  color: var(--good);
+  border-color: #2f5c39;
+}
+
+.badge.warn {
+  color: var(--warn);
+  border-color: #5c4a2f;
+}
+
+.badge.bad {
+  color: var(--bad);
+  border-color: #5c2f2f;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 6px 6px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+tbody tr:hover {
+  background: #1c202a;
+}
+
+.bars {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.bar {
+  display: grid;
+  /* 标签 / 条（固定 180px）/ 数值（固定宽，右对齐）—— 三列定宽，数字变化不推布局 */
+  grid-template-columns: minmax(64px, 96px) 180px 62px;
+  justify-content: start;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 780px) {
+  .bar {
+    grid-template-columns: minmax(56px, 84px) minmax(80px, 150px) auto;
+  }
+}
+
+.bar > .mono {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.bar-value {
+  white-space: nowrap;
+  text-align: right;
+}
+
+
+
+.bar .track {
+  display: block; /* 关键：span 默认 inline，宽高都会失效（填充就画不出来） */
+  height: 14px;
+  /* 未完成部分要看得见：明显的灰底 + 实心填充 */
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.bar .fill {
+  display: block; /* 同上：必须是块级，width/height 才生效 */
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #5eead4, #2dd4bf);
+  transition: width 0.35s ease;
+}
+
+/* 最终采用的策略：绿色实心（和参照条一致，一眼看出选中项） */
+.bar .fill.chosen {
+  background: linear-gradient(180deg, #34d399, #10b981);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.35);
+}
+
+
+
+.muted {
+  color: var(--muted);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 104px 1fr;
+  gap: 4px 10px;
+  font-size: 12.5px;
+}
+
+.kv span {
+  color: var(--muted);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.game-link {
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  color: inherit;
+}
+
+.game-link:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+.game-link h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+
+.game-link p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.note {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 10px;
+}
+
+/* 长文本单元格允许换行（默认全局是 nowrap，窄栏里会叠字） */
+td.wrap,
+th.wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* 难度总览：两张表各占一行，别并排挤在一起 */
+.difficulty-grid {
+  grid-template-columns: 1fr;
+}
+
+.difficulty-grid table {
+  width: 100%;
+}
+
+.difficulty-grid td,
+.difficulty-grid th {
+  vertical-align: top;
+  padding: 7px 8px;
+}
+
+.difficulty-grid td:first-child a {
+  font-weight: 600;
+}
+
+/* 记录列表：窄面板也不会溢出 */
+.records {
+  display: grid;
+  gap: 8px;
+}
+
+.record {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 7px;
+}
+
+.record:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.record-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.record-score {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.record-meta {
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: right;
+}
+
+.record-detail {
+  color: var(--muted);
+  font-size: 12.5px;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+/* 折叠/多列布局里，卡片和折叠内容都可能被长文本撑宽 → 统一约束 */
+.panels > .card,
+.layout.board-hidden .panels > .card {
+  min-width: 0;
+}
+
+details.note {
+  max-width: 100%;
+}
+
+details.note > div,
+.prompt-text {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  /* 不要用 pre-wrap：多列布局里它会按"不可断行的最小宽度"把卡片撑开 */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-x: auto;
+  max-height: 320px;
+}
+
+/*
+ * 折叠棋盘：只留数据面板。布局是"两栏 + 限制总宽"：
+ *   - 卡片分两栏（HTML 里用 .panel-col 包好），天然不会像 grid 那样留空洞，
+ *     也不像 CSS 多列那样把内部内容切列（那个会让 getBoundingClientRect 变成跨列并集，看着像溢出）；
+ *   - 整块限宽 980px，避免面板被拉得过宽（内容没那么多）。
+ */
+.layout.board-hidden {
+  grid-template-columns: 1fr;
+  max-width: 980px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.board-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+/* 注意：.board-only 上不能写行内 display，否则行内样式会盖掉这条 display:none */
+.layout.board-hidden .board-only {
+  display: none !important;
+}
+
+/* 两栏容器（展开状态下就是原来的单列侧栏） */
+.panels {
+  display: block;
+}
+
+.panel-col {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  min-width: 0;
+}
+
+.panel-col > .card + .card {
+  margin-top: 0;
+}
+
+.layout.board-hidden .panels {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.layout.board-hidden .panel-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+@media (max-width: 780px) {
+  .layout.board-hidden .panels {
+    display: block;
+  }
+
+  .layout.board-hidden .panel-col + .panel-col {
+    margin-top: 14px;
+  }
+}
+
+/* 频繁更新的文本块预留固定高度：文字变长时不会把卡片越撑越高（看着眼疼的那种跳动） */
+#decision-action {
+  min-height: 3.2em;
+  overflow: hidden;
+}
+
+#decision-situation {
+  min-height: 4.6em;
+}
+
+/* 数字统一用等宽数字，数值变化时不会左右抖 */
+.mono,
+.hud .stat b,
+.kv span,
+.badge,
+.record-score {
+  font-variant-numeric: tabular-nums;
+}
+
+/* HUD 小格子：固定高度 + 不换行，值变长（300ms → 1300ms）也不会把整排撑高 */
+.hud .stat {
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.hud .stat b {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#latency,
+#lag {
+  white-space: nowrap;
+}
