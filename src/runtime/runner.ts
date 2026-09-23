@@ -65,6 +65,14 @@ export interface RuntimeConfig {
    * progress detection. Bounds memory and keeps the fingerprint cheap.
    */
   stateFingerprintChars: number
+  /**
+   * What to do when a step offers exactly one candidate. `ask` (the default)
+   * keeps the provider in the loop; `execute` takes the step directly, because
+   * there is nothing to decide and a small local head cannot answer it at all
+   * (Laya's TopK needs k=2 over one class and fails the step). Stage scopes
+   * that narrow to a single control are what this policy exists for.
+   */
+  singleCandidateSteps: 'ask' | 'execute'
 }
 
 /** Partial runtime config as supplied by a caller; missing fields take defaults. */
@@ -81,6 +89,7 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   executeTimeoutMs: 90_000,
   stepDelayMs: 0,
   stateFingerprintChars: 2_000,
+  singleCandidateSteps: 'ask',
 }
 
 /** What one step of the loop produced. */
@@ -407,7 +416,15 @@ export class DecisionRuntime {
         if (options.provider !== undefined) request = { ...request, provider: options.provider }
         if (options.decisionMode !== undefined) request = { ...request, mode: options.decisionMode }
         request = { ...request, metadata: { ...request.metadata, environment: adapter.id, step } }
-        lastDecision = await phase('decide', check(), (signal, timeoutMs) => this.#engine.decide(request, {
+        // A choice set of one is not a choice: executing it needs no provider.
+        // Asking anyway is not merely wasteful — a small local head cannot
+        // answer it (Laya's TopK needs k=2 over a single class and fails the
+        // step with `provider_failed`), and a narrow stage scope deliberately
+        // produces such sets. Providers stay in the loop for real decisions.
+        const offered = request.candidates ?? []
+        lastDecision = config.singleCandidateSteps === 'execute' && offered.length === 1
+          ? { provider: 'single-candidate', mode: request.mode ?? 'choice', selected: offered[0]!.id, latencyMs: 0 }
+          : await phase('decide', check(), (signal, timeoutMs) => this.#engine.decide(request, {
           signal, timeoutMs: Math.min(timeoutMs, this.#engine.timeoutMs), debug: options.debug === true, environment: adapter.id, step,
           confidenceThreshold: config.confidenceThreshold,
           sourceTimings: {
@@ -527,6 +544,9 @@ export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> 
 export function validateRuntimeConfig(config: RuntimeConfig): void {
   for (const key of ['maxSteps', 'maxDurationMs', 'observeTimeoutMs', 'executeTimeoutMs', 'stateFingerprintChars'] as const) {
     if (!Number.isFinite(config[key]) || config[key] <= 0) throw new DecisionError('invalid_request', `${key} must be finite and positive.`)
+  }
+  if (config.singleCandidateSteps !== 'ask' && config.singleCandidateSteps !== 'execute') {
+    throw new DecisionError('invalid_request', 'singleCandidateSteps must be "ask" or "execute".')
   }
   for (const key of ['noProgressLimit', 'repeatedDecisionLimit', 'stepDelayMs'] as const) {
     if (!Number.isFinite(config[key]) || config[key] < 0) throw new DecisionError('invalid_request', `${key} must be finite and non-negative.`)

@@ -221,6 +221,10 @@ export const Config: z<Config> = z.object({
     stateFingerprintChars: z.number().default(2_000).description(
       'How many characters of environment state are compared to detect "no progress".',
     ),
+    singleCandidateSteps: z.union([z.const('ask'), z.const('execute')]).default('ask').description(
+      'What to do when a step offers exactly one candidate: ask the provider (default), or take it directly. '
+      + 'Stage scopes that narrow to a single control need "execute" — there is nothing to decide, and a small local head fails on it.',
+    ),
   }).description('Budgets and stop conditions shared by every environment.'),
   browser: z.object({
     includeNonSemantic: z.boolean().default(false).description('Opt in to inferred clickable elements. Requires browser workspace v0.1.10 or newer.'),

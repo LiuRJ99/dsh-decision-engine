@@ -242,6 +242,9 @@ wrong choice instead of hoping it is ignored:
 A plan holds at most 64 stages; split longer work across calls. A stage without
 a scope keeps the call-level configuration, and adapters without `withConfig`
 ignore the field.
+A step offering exactly one candidate never reaches the provider: there is
+nothing to decide, and a small local head cannot answer it anyway (Laya's TopK
+needs k=2 over one class and fails the step). The runtime executes it directly.
 
 ## Non-semantic browser controls
 

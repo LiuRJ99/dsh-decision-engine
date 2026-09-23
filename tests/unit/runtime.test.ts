@@ -285,6 +285,37 @@ describe('stop conditions', () => {
     assert.deepEqual(scopes, ['options', 'nav'])
   })
 
+  it('executes a single-candidate step without asking the provider', async () => {
+    // A stage scope can deliberately leave exactly one control ("advance now").
+    // There is nothing to decide, and a small local head cannot answer it at
+    // all (Laya's TopK needs k=2 over one class), so the runtime takes it.
+    let state: { text: string } = { text: 'q1 answered' }
+    const adapter: EnvironmentAdapter = {
+      id: 'single-env',
+      source: 'custom',
+      observe: async () => ({ status: 'ok', source: 'custom', state }),
+      buildDecisionRequest: () => ({
+        objective: 'advance', state,
+        candidates: [{ id: 'advance', description: 'Go to the next question' }],
+        mode: 'choice' as const,
+      }),
+      mapDecision: (result) => ({ kind: 'custom', target: result.selected, candidateId: result.selected ?? '', description: 'x' }),
+      execute: async () => { state = { text: 'q2' }; return { ok: true, message: 'ok' } },
+    }
+    const { runtime, provider } = harness({ decided: 'advance', environments: [adapter], runtimeConfig: { singleCandidateSteps: 'execute' } })
+    const outcome = await runtime.run({
+      environment: 'single-env',
+      objective: { description: 'x' },
+      mode: 'bounded-loop',
+      plan: [{ id: 'n1', objective: 'advance', completion: { path: 'text', includes: 'q2' }, maxSteps: 2 }],
+    })
+    assert.equal(outcome.status, 'done')
+    assert.equal(outcome.decision?.provider, 'single-candidate')
+    assert.equal(outcome.decision?.selected, 'advance')
+    // The provider was never consulted for this step.
+    assert.equal((provider as unknown as { calls: unknown[] }).calls.length, 0)
+  })
+
   it('judges progress on the adapter key, not on element numbering that churns', async () => {
     // Indices are addressing. A page that rebuilds its controls returns new
     // numbers for an unchanged situation, so a whole-state fingerprint reports

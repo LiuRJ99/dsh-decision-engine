@@ -61,6 +61,14 @@ export interface RuntimeConfig {
      * progress detection. Bounds memory and keeps the fingerprint cheap.
      */
     stateFingerprintChars: number;
+    /**
+     * What to do when a step offers exactly one candidate. `ask` (the default)
+     * keeps the provider in the loop; `execute` takes the step directly, because
+     * there is nothing to decide and a small local head cannot answer it at all
+     * (Laya's TopK needs k=2 over one class and fails the step). Stage scopes
+     * that narrow to a single control are what this policy exists for.
+     */
+    singleCandidateSteps: 'ask' | 'execute';
 }
 /** Partial runtime config as supplied by a caller; missing fields take defaults. */
 export type RuntimeConfigInput = Partial<RuntimeConfig>;
