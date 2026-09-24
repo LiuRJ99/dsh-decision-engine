@@ -56,8 +56,8 @@ export class DecisionRouter {
    * @throws DecisionError with `provider_unknown` or `provider_unavailable`.
    */
   setDefaultProvider(id: string | undefined): void {
-    const next = id ?? this.#registry.enabledIds()[0]
-    if (next !== undefined) this.#registry.setDefault(next)
+    if (id === undefined) this.#registry.resetDefault()
+    else this.#registry.setDefault(id)
   }
 
   /** Allow or forbid capability fallback. */
@@ -85,6 +85,14 @@ export class DecisionRouter {
       this.#registry.require(providerId)
       this.#registry.assertCapability(providerId, mode)
       return { providerId, reason: 'explicit' }
+    }
+
+    const pending = this.#registry.getPendingDefaultId()
+    if (pending !== undefined) {
+      throw new DecisionError('provider_unknown', `Default decision provider "${pending}" has not registered yet.`, {
+        subject: pending,
+        details: { registered: this.#registry.ids() },
+      })
     }
 
     const preferred = this.#registry.getDefaultId()

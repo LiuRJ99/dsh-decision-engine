@@ -65,7 +65,7 @@ Browser / Computer / Custom / HTTP 环境适配器**一行都不用改**。
 
 ```bash
 # 从固定 tag 安装（本仓库推荐的方式）
-dsh plugin --profile web-candidate add github:LiuRJ99/dsh-decision-engine#v0.4.13
+dsh plugin --profile web-candidate add github:LiuRJ99/dsh-decision-engine#v0.4.14
 
 # 或用本地 checkout / release tarball
 dsh plugin --profile web-candidate add /path/to/dsh-decision-engine
@@ -303,7 +303,18 @@ Provider ID 注册。单次 `decision_decide` / `decision_run` 可用 `provider`
 - **重启后生效**：配置文件中的 `providers.*`。Laya 运行时在启动时创建。
 - 面板读到的是**已保存的解析值**：schema 默认、bundle 行、用户覆盖三层合并后的结果；
   只有你真正改过的字段才会被记为「用户覆盖」。
-- 未注册的 Provider ID 会被 Host 拒绝。仅关闭 Laya 时，重启后可保持引擎运行并报告无可用 Provider。
+- 已保存的 Provider ID 若尚未注册，引擎会等待对应插件注册并明确报告不可用；不会转用 Laya。
+  仅关闭 Laya 时，重启后可保持引擎运行并报告无可用 Provider。
+
+### 接入其他本地 Provider
+
+目前随包提供的模型实现只有本地 Laya。其他模型日后可由独立 DSH 插件实现
+`DecisionProvider`，在注入 `decisionEngine` 服务后调用
+`ctx.decisionEngine.providers.register(provider)`；卸载时执行返回的注销函数。
+Provider 插件自行管理和验证自己的设置，Engine 设置只保存 `defaultProvider`。
+注册后下拉框会从运行中的注册表读取其 ID。若该 ID 已保存在设置中，注册时会自动
+成为默认 Provider。嵌入式入口也可直接传 `createDecisionLayer({ providers: [provider] })`，
+此时不会隐式加入 Laya；需要两者时显式传入 `laya` 配置。
 
 循环预算有保护性默认值：单次循环最多 10 步、2 分钟；整任务 `decision_run`
 默认最多 1000 步、10 分钟。它们不是所有任务的最佳值，长任务应在调用时覆盖。
@@ -353,7 +364,7 @@ class JevDecisionProvider implements DecisionProvider {
   async healthCheck(): Promise<ProviderHealth> { … }
 }
 
-// 2. 注册（配置，或组合根的 extraProviders）
+// 2. 注册（嵌入入口传 providers，或独立插件注入 decisionEngine 后注册）
 registry.register(new JevDecisionProvider(), { enabled: true })
 
 // 3. 把默认指过去

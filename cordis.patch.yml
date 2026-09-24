@@ -13,9 +13,9 @@
 # The relative `name` is anchored beside this package's patch file by DSH.
 # A file entry also lets the Web client discover this package's `dsh.client`.
 #
-# Provider-private settings belong under `providers.<id>` — never as top-level
-# keys — so a second model family can be added without touching this row's
-# schema. `providers.laya.modelDir` has no portable default: leave it unset and
+# Bundled Laya settings live under `providers.laya`. Independently mounted
+# providers own their settings namespace and register through decisionEngine.
+# `providers.laya.modelDir` has no portable default: leave it unset and
 # the SDK resolves its own cached bundle, or point it at a local export
 # directory from the profile's own cordis.patch.yml.
 

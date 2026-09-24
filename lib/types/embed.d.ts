@@ -23,6 +23,7 @@
  *
  * @module dsh-decision-engine/embed
  */
+import { type ProviderSpec } from './assembly.ts';
 import type { DecisionEngine } from './core/decision-engine.ts';
 import type { DecisionProviderRegistry } from './core/provider-registry.ts';
 import type { DecisionProvider, DecisionRequest, DecisionResult } from './core/types.ts';
@@ -35,10 +36,10 @@ import type { LayaConfig } from './providers/laya/config.ts';
 import type { DecisionEngineHealth } from './service.ts';
 /** Options for {@link createDecisionLayer}. */
 export interface EmbedOptions {
-    /** Register the Laya provider. Defaults to true. */
+    /** Register the Laya provider. Defaults to true only when `providers` is omitted. */
     laya?: boolean | LayaConfig;
-    /** Additional providers, tried by explicit `provider` id or as the default. */
-    providers?: DecisionProvider[];
+    /** Providers, as instances or specs with registration settings. */
+    providers?: readonly (DecisionProvider | ProviderSpec)[];
     /** Provider id used when a request does not name one. Defaults to the first registered. */
     defaultProvider?: string;
     /** Runtime budgets and stop conditions. */

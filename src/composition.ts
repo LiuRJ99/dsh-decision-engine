@@ -9,7 +9,7 @@
  *
  * Two invariants this file owns:
  *
- * 1. The Laya provider is constructed by the shared assembly root. Deleting
+ * 1. Laya is supplied to the generic assembly as a ProviderSpec. Deleting
  *    `providers/laya/` leaves everything in
  *    `core/`, `runtime/`, `environments/`, or `tools/`.
  * 2. Environments are built over an injected {@link ToolDispatcher}, never over
@@ -21,19 +21,21 @@
  */
 
 import z from '@deepseek-ai/schemastery'
-import { aggregateDecisionHealth, assembleDecisionCore } from './assembly.ts'
+import { aggregateDecisionHealth, assembleDecisionCore, type ProviderSpec } from './assembly.ts'
 import type { DecisionEngine } from './core/decision-engine.ts'
 import { DecisionError } from './core/errors.ts'
 import type { DecisionProviderRegistry } from './core/provider-registry.ts'
 import { createRingBufferSink, type DecisionTelemetry } from './core/telemetry.ts'
-import type { DecisionProvider } from './core/types.ts'
 import { EnvironmentRegistry } from './environments/registry.ts'
 import { BrowserEnvironmentAdapter, type BrowserActionCandidate } from './environments/browser/adapter.ts'
 import { ComputerEnvironmentAdapter, type ComputerAdapterConfig, type ComputerSeam } from './environments/computer/adapter.ts'
 import type { ToolDispatcher } from './environments/dispatch.ts'
 import type { DecisionRuntime, RuntimeConfigInput } from './runtime/runner.ts'
-import { DEFAULT_LAYA_IDLE_TTL_MS, type LayaConfig } from './providers/laya/config.ts'
+import { LayaConfigSchema, type LayaConfig } from './providers/laya/config.ts'
+import { createLayaProviderSpec } from './providers/laya/index.ts'
 import type { DecisionEngineService } from './service.ts'
+
+export type { ProviderSpec } from './assembly.ts'
 
 /**
  * Plugin configuration. Mirrors the documented shape:
@@ -66,18 +68,14 @@ export interface Config {
   /**
    * Per-provider settings, keyed by provider id.
    *
-   * `laya` is declared explicitly for schema validation; the Web settings
-   * card selects the common fields. Another family adds a sibling key.
-   * The index signature keeps an unknown provider id representable, because the
-   * file-backed settings document is user-editable and forward compatibility
-   * matters more here than a closed type.
+   * `laya` remains here for compatibility with existing settings. Other
+   * provider plugins own their private settings and register at runtime.
+   * The index signature preserves user-editable provider keys.
    */
   providers?: {
     /**
-     * The provider's own settings. Typed loosely here because the schema above
-     * describes these fields generically (it must not carry provider
-     * vocabulary); `LayaConfig` is the precise shape and
-     * `resolveLayaConfig` is what validates and defaults it.
+     * The provider's own settings. Laya validates these in its module;
+     * `LayaConfig` is the precise shape.
      */
     laya?: Record<string, unknown>
     [providerId: string]: Record<string, unknown> | undefined
@@ -145,49 +143,19 @@ export type { BrowserActionCandidate }
  *    settings card is registered separately by the client entry;
  * 3. `createDecisionEngineComposition` reads the defaults from it.
  *
- * `providers` stays a dict because provider-private settings belong under
- * `providers.<id>` — a second model family adds a key, not a schema field.
+ * `providers.laya` is the compatibility path for the bundled local model.
+ * Independently mounted providers validate their own settings namespace.
  */
 export const Config: z<Config> = z.object({
   enabled: z.boolean().default(true).description(
     'Whether the decision layer is active at all. Turning this off removes the tool and stops answering decisions.',
   ),
   defaultProvider: z.string().description(
-    'Provider id used when a request does not name one (for example "laya"). Leave empty to use the first enabled provider.',
+    'Provider id used when a request does not name one (for example "laya"). Omit it to use the first enabled provider.',
   ),
   providers: z.object({
-    // A named sub-object validates Laya's fields. A second provider family
-    // adds a sibling key; provider-private fields stay under `providers.<id>`.
-    laya: z.object({
-      enabled: z.boolean().default(true).description('Whether the Laya provider is registered. Turn off to run the layer without a model.'),
-      modelDir: z.string().description(
-        'Directory holding laya.onnx, laya.onnx.data, laya_config.json and tokenizer/. '
-        + 'Setting it skips the SDK freshness check and its download entirely, which is required on a machine whose cache is not writable.',
-      ),
-      device: z.string().default('cpu').description('ONNX execution provider: cpu, coreml, cuda, dml or wasm — or a comma-separated list.'),
-      threads: z.number().description('intraOpNumThreads override. 0 leaves the runtime default.'),
-      autoLoad: z.boolean().default(false).description(
-        'Load the model at startup instead of on the first decision. Off by default: a session pins the weights (about 1.6 GB) for as long as it is open.',
-      ),
-      idleTtlMs: z.number().default(DEFAULT_LAYA_IDLE_TTL_MS).description(
-        'Release the model after this many milliseconds without a decision; defaults to ten minutes. 0 keeps it resident for the process lifetime.',
-      ),
-      required: z.boolean().default(false).description('Treat an unavailable model as a hard failure instead of reporting the provider as degraded.'),
-      strictCandidates: z.boolean().default(true).description('Refuse a model answer that names an option which was not on the ballot.'),
-      // Deliberately a plain string, not the provider's own union: naming its
-      // literals here would put provider vocabulary in the neutral composition
-      // root, which is exactly the coupling this project exists to avoid.
-      // `resolveLayaConfig` validates the value; this schema only renders it.
-      classificationBinaryMode: z.string().default('choice').description(
-        'How a two-option classification is asked when the provider supports a binary head; '
-        + 'see the provider documentation for the accepted values.',
-      ),
-      scoreLevels: z.array(z.string()).description('Rating scale for ranking and score modes, lowest first.'),
-      scoringMode: z.string().default('per-candidate').description('Ratings strategy: "per-candidate" rates every option.'),
-      timeoutMs: z.number().default(30_000).description('Per-call budget hint in milliseconds.'),
-      maxStateChars: z.number().default(20_000).description('Maximum characters of serialized state sent to the model.'),
-    }).description('Laya: the first Decision Provider. Everything here is Laya-private.'),
-  }).description('Per-provider settings, keyed by provider id. Provider-private fields live here, never as top-level keys.'),
+    laya: LayaConfigSchema,
+  }).description('Bundled Laya settings. Independently mounted providers own their settings namespace.'),
   runtime: z.object({
     maxSteps: z.number().default(10).description(
       'Hard step limit for one bounded loop. The run escalates instead of exceeding it.',
@@ -268,8 +236,12 @@ export function createDecisionEngineComposition(options: {
   computerSeam?: ComputerSeam
   /** Read-only capability-gate query. */
   readCapabilityGate?: (capability: 'browser' | 'computer') => boolean | undefined
-  /** Extra providers to register after the built-in ones. */
-  extraProviders?: Array<{ provider: DecisionProvider; enabled?: boolean; config?: Record<string, unknown> }>
+  /** Provider instances supplied by the caller, alongside the local Laya adapter. */
+  providers?: readonly ProviderSpec[]
+  /** @deprecated Use `providers`. Kept for existing embedders. */
+  extraProviders?: readonly ProviderSpec[]
+  /** Host boot may wait for an independently mounted provider plugin. */
+  deferMissingDefault?: boolean
 }): DecisionEngineComposition {
   const config = options.config ?? {}
   const { sink, records } = createRingBufferSink(config.telemetryLimit ?? 200)
@@ -307,10 +279,18 @@ export function createDecisionEngineComposition(options: {
   }
 
   const layaConfig = (config.providers?.laya ?? {}) as LayaConfig
+  const includeLaya = layaConfig.enabled !== false
+    && (options.providers === undefined || config.providers?.laya !== undefined)
+  const providerSpecs: ProviderSpec[] = [
+    ...(includeLaya ? [createLayaProviderSpec(layaConfig)] : []),
+    ...(options.providers ?? options.extraProviders ?? []),
+  ]
+  const disabledDefault = config.defaultProvider !== undefined
+    && config.providers?.[config.defaultProvider]?.enabled === false
   const { providers, engine, runtime } = assembleDecisionCore({
-    laya: layaConfig.enabled === false ? false : layaConfig,
-    ...options.extraProviders === undefined ? {} : { extraProviders: options.extraProviders },
-    ...config.defaultProvider === undefined ? {} : { defaultProvider: config.defaultProvider },
+    providers: providerSpecs,
+    ...config.defaultProvider === undefined || disabledDefault ? {} : { defaultProvider: config.defaultProvider },
+    ...options.deferMissingDefault === undefined ? {} : { deferMissingDefault: options.deferMissingDefault },
     ...config.runtime === undefined ? {} : { runtime: config.runtime },
     ...config.runtime?.confidenceThreshold === undefined ? {} : { confidenceThreshold: config.runtime.confidenceThreshold },
     ...config.runtime?.observeTimeoutMs === undefined ? {} : { timeoutMs: config.runtime.observeTimeoutMs },
@@ -320,13 +300,18 @@ export function createDecisionEngineComposition(options: {
 
   let requestedDefault = config.defaultProvider
   const setDefaultProvider = (requested?: string): void => {
+    const isDisabled = requested !== undefined && config.providers?.[requested]?.enabled === false
     if (requested !== undefined && !providers.has(requested)
-      && !(requested === 'laya' && layaConfig.enabled === false)) {
+      && !isDisabled && !options.deferMissingDefault) {
       throw new DecisionError('provider_unknown', `defaultProvider "${requested}" is not registered`)
     }
-    const active = requested !== undefined && providers.entry(requested)?.enabled
-      ? requested : providers.enabledIds()[0]
-    if (active !== undefined) engine.reconfigure({ defaultProviderId: active })
+    if (requested !== undefined && providers.entry(requested)?.enabled) {
+      engine.reconfigure({ defaultProviderId: requested })
+    } else if (requested !== undefined && !providers.has(requested) && !isDisabled && options.deferMissingDefault) {
+      providers.deferDefault(requested)
+    } else {
+      engine.router.setDefaultProvider(undefined)
+    }
     requestedDefault = requested
   }
 

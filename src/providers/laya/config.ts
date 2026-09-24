@@ -9,6 +9,8 @@
  * @module dsh-decision-engine/providers/laya/config
  */
 
+import z from '@deepseek-ai/schemastery'
+
 /** How a `classification` request is asked when the candidate set is binary. */
 export type LayaBinaryMode = 'choice' | 'noul'
 
@@ -111,6 +113,33 @@ export const DEFAULT_SCORE_LEVELS = [
 
 /** Keep a loaded Laya session warm for ten idle minutes by default. */
 export const DEFAULT_LAYA_IDLE_TTL_MS = 10 * 60_000
+
+/** Host settings schema for Laya's own configuration. */
+export const LayaConfigSchema = z.object({
+  enabled: z.boolean().default(true).description('Whether the Laya provider is registered. Turn off to run the layer without a model.'),
+  modelDir: z.string().description(
+    'Directory holding laya.onnx, laya.onnx.data, laya_config.json and tokenizer/. '
+    + 'Setting it skips the SDK freshness check and its download entirely, which is required on a machine whose cache is not writable.',
+  ),
+  device: z.string().default('cpu').description('ONNX execution provider: cpu, coreml, cuda, dml or wasm — or a comma-separated list.'),
+  threads: z.number().description('intraOpNumThreads override. 0 leaves the runtime default.'),
+  autoLoad: z.boolean().default(false).description(
+    'Load the model at startup instead of on the first decision. Off by default: a session pins the weights (about 1.6 GB) for as long as it is open.',
+  ),
+  idleTtlMs: z.number().default(DEFAULT_LAYA_IDLE_TTL_MS).description(
+    'Release the model after this many milliseconds without a decision; defaults to ten minutes. 0 keeps it resident for the process lifetime.',
+  ),
+  required: z.boolean().default(false).description('Treat an unavailable model as a hard failure instead of reporting the provider as degraded.'),
+  strictCandidates: z.boolean().default(true).description('Refuse a model answer that names an option which was not on the ballot.'),
+  classificationBinaryMode: z.string().default('choice').description(
+    'How a two-option classification is asked when the provider supports a binary head; '
+    + 'see the provider documentation for the accepted values.',
+  ),
+  scoreLevels: z.array(z.string()).description('Rating scale for ranking and score modes, lowest first.'),
+  scoringMode: z.string().default('per-candidate').description('Ratings strategy: "per-candidate" rates every option.'),
+  timeoutMs: z.number().default(30_000).description('Per-call budget hint in milliseconds.'),
+  maxStateChars: z.number().default(20_000).description('Maximum characters of serialized state sent to the model.'),
+}).description('Laya: the first Decision Provider. Everything here is Laya-private.')
 
 const DEFAULT_CHOICE_INSTRUCTIONS = [
   'You are choosing the single best next action for an agent.',

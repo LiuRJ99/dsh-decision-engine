@@ -64,6 +64,22 @@ async function httpGame(options: { over?: boolean; rejectStale?: boolean; change
 }
 
 describe('independent task takeover', () => {
+  it('host plugin accepts a saved external default before its provider mounts', async () => {
+    const services = new Map<string, unknown>()
+    const ctx = {
+      tools: { register: () => () => {} },
+      get: (name: string) => services.get(name),
+      provide: (name: string, value: unknown) => services.set(name, value),
+      effect: () => {}, systemPrompt: { section: () => {} },
+    }
+    apply(ctx as never, { defaultProvider: 'test-policy', providers: { laya: { enabled: false } } })
+    const service = services.get('decisionEngine') as DecisionEngineService
+    assert.equal((await service.health()).requestedDefaultProvider, 'test-policy')
+    service.providers.register(picker())
+    assert.equal((await service.health()).defaultProvider, 'test-policy')
+    await service.dispose()
+  })
+
   it('one DSH tool call plays a whole HTTP game and returns the authoritative score', async () => {
     const game = await httpGame()
     let decisions = 0
@@ -102,6 +118,12 @@ describe('independent task takeover', () => {
       assert.deepEqual(result.result, { score: 200, outcome: 'won' })
       assert.equal(game.counts().posts, 0)
     } finally { await layer.dispose(); await game.close() }
+  })
+
+  it('uses an explicit provider list without adding Laya by default', async () => {
+    const layer = createDecisionLayer({ providers: [picker()] })
+    assert.deepEqual(layer.providers.ids(), ['test-policy'])
+    await layer.dispose()
   })
 
   for (const kind of ['rejectStale', 'changeEpisode'] as const) {

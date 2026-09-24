@@ -246,6 +246,43 @@ describe('composition lifecycle', () => {
     }), (error: unknown) => error instanceof DecisionError && error.code === 'provider_unknown')
   })
 
+  it('waits for a separately mounted provider named by persisted config', async () => {
+    const created = createDecisionEngineComposition({
+      config: { defaultProvider: 'future', providers: { laya: { enabled: false } } },
+      dispatcher: createMapDispatcher({}),
+      deferMissingDefault: true,
+    })
+    assert.equal((await created.service.health()).requestedDefaultProvider, 'future')
+    await assert.rejects(created.service.decide(MINIMAL), (error: unknown) =>
+      error instanceof DecisionError && error.code === 'provider_unknown')
+    const unregister = created.service.providers.register(constantProvider('open', { id: 'future' }))
+    assert.equal((await created.service.decide(MINIMAL)).provider, 'future')
+    assert.equal((await created.service.health()).defaultProvider, 'future')
+    unregister()
+    await created.dispose()
+  })
+
+  it('does not silently use Laya while an external default is pending', async () => {
+    const created = createDecisionEngineComposition({
+      config: { defaultProvider: 'future' },
+      dispatcher: createMapDispatcher({}),
+      deferMissingDefault: true,
+    })
+    const health = await created.service.health()
+    assert.equal(health.status, 'degraded')
+    assert.equal(health.defaultProvider, undefined)
+    assert.equal(health.requestedDefaultProvider, 'future')
+    await assert.rejects(created.service.decide(MINIMAL), (error: unknown) =>
+      error instanceof DecisionError && error.code === 'provider_unknown')
+    const unregister = created.providers.register(constantProvider('open', { id: 'future' }))
+    assert.equal((await created.service.decide(MINIMAL)).provider, 'future')
+    unregister()
+    assert.equal((await created.service.health()).defaultProvider, undefined)
+    await assert.rejects(created.service.decide(MINIMAL), (error: unknown) =>
+      error instanceof DecisionError && error.code === 'provider_unknown')
+    await created.dispose()
+  })
+
   it('routes through the active provider when the requested default is disabled', async () => {
     const created = createDecisionEngineComposition({
       config: { defaultProvider: 'off', providers: { laya: { enabled: false } } },
@@ -284,6 +321,15 @@ describe('composition lifecycle', () => {
     assert.deepEqual(withLaya.providers.ids(), ['laya'])
     const withoutLaya = createDecisionEngineComposition({ config: { providers: { laya: { enabled: false } } }, dispatcher: createMapDispatcher({}) })
     assert.deepEqual(withoutLaya.providers.ids(), [])
+  })
+
+  it('uses supplied provider specs without implicitly adding Laya', async () => {
+    const created = createDecisionEngineComposition({
+      dispatcher: createMapDispatcher({}),
+      providers: [{ provider: constantProvider('open', { id: 'custom' }) }],
+    })
+    assert.deepEqual(created.providers.ids(), ['custom'])
+    await created.dispose()
   })
 
   it('starts without a provider when Laya is disabled but remains the configured default', async () => {

@@ -17,7 +17,7 @@ import type {} from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { toDecisionFailure } from './core/errors.ts'
 import { toolFailure, type ToolCallRequest, type ToolCallResult, type ToolDispatcher } from './environments/dispatch.ts'
-import { Config as ConfigSchema, createDecisionEngineComposition, type Config, type DecisionEngineComposition } from './composition.ts'
+import { Config as ConfigSchema, createDecisionEngineComposition, type Config } from './composition.ts'
 import { defineDecideTool } from './tools/decision-decide.ts'
 import { defineRunTool } from './tools/decision-run.ts'
 import type { ToolExecutionScope } from './tools/execution-scope.ts'
@@ -140,16 +140,13 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   // The persisted section must be read before construction: provider and
   // environment changes marked "restart" need to shape the next instance.
-  let activeComposition: DecisionEngineComposition | undefined
   const settings = ctx.get('settings') as unknown as SettingsSurface | undefined
   const settingsScope = settings?.register(SETTINGS_NAMESPACE, ConfigSchema, {
     base: config,
     applies: 'live',
     validate: (value: Config) => {
-      if (activeComposition !== undefined && value.defaultProvider !== undefined
-        && !activeComposition.providers.has(value.defaultProvider)
-        && !(value.defaultProvider === 'laya' && value.providers?.laya?.enabled === false)) {
-        throw new Error(`defaultProvider "${value.defaultProvider}" is not registered`)
+      if (value.defaultProvider !== undefined && value.defaultProvider.trim() === '') {
+        throw new Error('defaultProvider must be a non-empty provider id')
       }
       validateRuntimeConfig({ ...DEFAULT_RUNTIME_CONFIG, ...value.runtime })
     },
@@ -160,13 +157,12 @@ export function apply(ctx: Context, config: Config = {}): void {
   const composition = createDecisionEngineComposition({
     config: initialConfig,
     dispatcher,
+    deferMissingDefault: true,
     readCapabilityGate: (capability: 'browser' | 'computer') => {
       const agent = execution.getStore()?.agent ?? requestAgent(ctx)
       return queryCapabilityUnlocked(gate(), agent, capability)
     },
   })
-  activeComposition = composition
-
   // Web settings reads the live registry so its model selector includes
   // providers registered by other plugins after this composition was built.
   const webServer = ctx.get('webServer' as never) as unknown as {

@@ -68,13 +68,16 @@ describe('provider registration', () => {
     assert.throws(() => registry.require('off'), (error: unknown) => error instanceof DecisionError && error.code === 'provider_unavailable')
   })
 
-  it('falls back to the next enabled provider when the default is unregistered', () => {
+  it('keeps an explicitly selected provider pending when it is unregistered', () => {
     const registry = new DecisionProviderRegistry()
     registry.register(constantProvider('a', { id: 'first' }))
     const dispose = registry.register(constantProvider('b', { id: 'second' }))
     registry.setDefault('second')
     assert.equal(registry.getDefaultId(), 'second')
     dispose()
+    assert.equal(registry.getDefaultId(), undefined)
+    assert.equal(registry.getPendingDefaultId(), 'second')
+    registry.resetDefault()
     assert.equal(registry.getDefaultId(), 'first')
   })
 
@@ -163,7 +166,7 @@ describe('engine routing', () => {
       error instanceof DecisionError && error.code === 'provider_unsupported_capability')
   })
 
-  it('uses the registry default after reconfiguration or unregistering', async () => {
+  it('keeps an explicit default when a provider unloads, then allows reset', async () => {
     const registry = new DecisionProviderRegistry()
     registry.register(constantProvider('submit', { id: 'first' }))
     const removeSecond = registry.register(constantProvider('wait', { id: 'second' }))
@@ -172,6 +175,10 @@ describe('engine routing', () => {
     assert.equal(engine.router.defaultProviderId, registry.getDefaultId())
     assert.equal((await engine.decide(REQUEST)).provider, 'second')
     removeSecond()
+    assert.equal(engine.router.defaultProviderId, undefined)
+    await assert.rejects(engine.decide(REQUEST), (error: unknown) =>
+      error instanceof DecisionError && error.code === 'provider_unknown')
+    engine.router.setDefaultProvider(undefined)
     assert.equal(engine.router.defaultProviderId, 'first')
     assert.equal((await engine.decide(REQUEST)).provider, 'first')
   })

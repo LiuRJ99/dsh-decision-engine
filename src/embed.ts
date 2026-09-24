@@ -24,7 +24,7 @@
  * @module dsh-decision-engine/embed
  */
 
-import { aggregateDecisionHealth, assembleDecisionCore } from './assembly.ts'
+import { aggregateDecisionHealth, assembleDecisionCore, type ProviderSpec } from './assembly.ts'
 import type { DecisionEngine } from './core/decision-engine.ts'
 import { DecisionError } from './core/errors.ts'
 import type { DecisionProviderRegistry } from './core/provider-registry.ts'
@@ -36,14 +36,15 @@ import type { EnvironmentAdapter, Objective } from './environments/types.ts'
 import type { DecisionRuntime, ExecutionMode, RunOptions, RuntimeConfig, RuntimeConfigInput, RuntimeOutcome, TaskOptions, TaskOutcome } from './runtime/runner.ts'
 import { CustomEnvironmentAdapter, type CustomEnvironmentSpec } from './environments/custom/adapter.ts'
 import type { LayaConfig } from './providers/laya/config.ts'
+import { createLayaProviderSpec } from './providers/laya/index.ts'
 import type { DecisionEngineHealth } from './service.ts'
 
 /** Options for {@link createDecisionLayer}. */
 export interface EmbedOptions {
-  /** Register the Laya provider. Defaults to true. */
+  /** Register the Laya provider. Defaults to true only when `providers` is omitted. */
   laya?: boolean | LayaConfig
-  /** Additional providers, tried by explicit `provider` id or as the default. */
-  providers?: DecisionProvider[]
+  /** Providers, as instances or specs with registration settings. */
+  providers?: readonly (DecisionProvider | ProviderSpec)[]
   /** Provider id used when a request does not name one. Defaults to the first registered. */
   defaultProvider?: string
   /** Runtime budgets and stop conditions. */
@@ -122,16 +123,19 @@ export function createDecisionLayer(options: EmbedOptions = {}): EmbeddedDecisio
         }
       }
 
-  const layaOption = options.laya ?? true
+  const layaOption = options.laya ?? (options.providers === undefined)
   if (layaOption === false && (options.providers?.length ?? 0) === 0) {
     throw new DecisionError('provider_unavailable', 'createDecisionLayer was called with no providers.', {
       details: { hint: 'Pass providers: [...] or leave laya enabled.' },
     })
   }
   const environments = new EnvironmentRegistry()
+  const providerSpecs: ProviderSpec[] = [
+    ...(layaOption === false ? [] : [createLayaProviderSpec(typeof layaOption === 'object' ? layaOption : {})]),
+    ...(options.providers ?? []).map(entry => 'provider' in entry ? entry : { provider: entry }),
+  ]
   const { providers, engine, runtime } = assembleDecisionCore({
-    laya: layaOption === false ? false : typeof layaOption === 'object' ? layaOption : {},
-    extraProviders: (options.providers ?? []).map(provider => ({ provider })),
+    providers: providerSpecs,
     ...options.defaultProvider === undefined ? {} : { defaultProvider: options.defaultProvider },
     ...options.runtime === undefined ? {} : { runtime: options.runtime },
     ...options.confidenceThreshold === undefined ? {} : { confidenceThreshold: options.confidenceThreshold },

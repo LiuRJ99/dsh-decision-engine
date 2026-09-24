@@ -278,7 +278,7 @@ class JevDecisionProvider implements DecisionProvider {
   async healthCheck(): Promise<ProviderHealth> { … }
 }
 
-// 2. register it (config, or the composition's extraProviders)
+// 2. register it (pass providers to an embedder, or inject decisionEngine in a plugin)
 registry.register(new JevDecisionProvider(), { enabled: true })
 
 // 3. point the default at it
@@ -304,6 +304,15 @@ const outcome = await decisions.runTask({
   objective: 'Win this round.',
 })
 ```
+
+Passing `providers: [provider]` instead uses only the supplied providers;
+Laya is included only when `laya` is explicitly set or no provider list is
+given. A separate DSH provider plugin can inject `decisionEngine`, call
+`ctx.decisionEngine.providers.register(provider)`, and run the returned
+unregister function on disposal. It owns and validates its own settings;
+the Engine stores only the selected `defaultProvider`. A saved provider ID
+that has not registered yet blocks default routing with `provider_unknown`
+until it registers, rather than silently selecting Laya.
 
 `runTask` and `decideEnvironment` return runtime escalations as a **value** (serializable, with
 `guidance`) instead of throwing — the shape a bridge forwards. `decide` keeps

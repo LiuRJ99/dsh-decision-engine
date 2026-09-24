@@ -8,6 +8,7 @@
  *
  * @module dsh-decision-engine/providers/laya/config
  */
+import z from '@deepseek-ai/schemastery';
 /** How a `classification` request is asked when the candidate set is binary. */
 export type LayaBinaryMode = 'choice' | 'noul';
 /** How `score`/`ranking` requests are asked. */
@@ -98,6 +99,36 @@ export interface ResolvedLayaConfig {
 export declare const DEFAULT_SCORE_LEVELS: readonly ["a very poor choice", "a poor choice", "an acceptable choice", "a good choice", "a very good choice"];
 /** Keep a loaded Laya session warm for ten idle minutes by default. */
 export declare const DEFAULT_LAYA_IDLE_TTL_MS: number;
+/** Host settings schema for Laya's own configuration. */
+export declare const LayaConfigSchema: z<Schemastery.ObjectS<{
+    enabled: z<boolean, boolean>;
+    modelDir: z<string, string>;
+    device: z<string, string>;
+    threads: z<number, number>;
+    autoLoad: z<boolean, boolean>;
+    idleTtlMs: z<number, number>;
+    required: z<boolean, boolean>;
+    strictCandidates: z<boolean, boolean>;
+    classificationBinaryMode: z<string, string>;
+    scoreLevels: z<string[], string[]>;
+    scoringMode: z<string, string>;
+    timeoutMs: z<number, number>;
+    maxStateChars: z<number, number>;
+}>, Schemastery.ObjectT<{
+    enabled: z<boolean, boolean>;
+    modelDir: z<string, string>;
+    device: z<string, string>;
+    threads: z<number, number>;
+    autoLoad: z<boolean, boolean>;
+    idleTtlMs: z<number, number>;
+    required: z<boolean, boolean>;
+    strictCandidates: z<boolean, boolean>;
+    classificationBinaryMode: z<string, string>;
+    scoreLevels: z<string[], string[]>;
+    scoringMode: z<string, string>;
+    timeoutMs: z<number, number>;
+    maxStateChars: z<number, number>;
+}>>;
 /**
  * Resolve raw config (with optional environment fallbacks) into a fully
  * specified {@link ResolvedLayaConfig}.

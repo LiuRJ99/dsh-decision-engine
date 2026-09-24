@@ -4,7 +4,6 @@ import { DecisionProviderRegistry } from './core/provider-registry.ts';
 import type { DecisionTelemetry, DecisionTelemetrySink } from './core/telemetry.ts';
 import type { DecisionProvider } from './core/types.ts';
 import { EnvironmentRegistry } from './environments/registry.ts';
-import type { LayaConfig } from './providers/laya/config.ts';
 import { DecisionRuntime, type RuntimeConfigInput } from './runtime/runner.ts';
 import type { DecisionEngineHealth } from './service.ts';
 export interface ProviderSpec {
@@ -13,9 +12,9 @@ export interface ProviderSpec {
     config?: Record<string, unknown>;
 }
 export declare function assembleDecisionCore(options: {
-    laya: false | LayaConfig;
-    extraProviders?: readonly ProviderSpec[];
+    providers: readonly ProviderSpec[];
     defaultProvider?: string;
+    deferMissingDefault?: boolean;
     runtime?: RuntimeConfigInput;
     confidenceThreshold?: number;
     timeoutMs?: number;

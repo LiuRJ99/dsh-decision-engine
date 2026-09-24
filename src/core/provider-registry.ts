@@ -53,6 +53,8 @@ export interface RegisterOptions {
 export class DecisionProviderRegistry {
   readonly #entries = new Map<string, ProviderRegistration>()
   #defaultId: string | undefined
+  #pendingDefaultId: string | undefined
+  #pinnedDefaultId: string | undefined
 
   /**
    * Add a provider.
@@ -93,17 +95,24 @@ export class DecisionProviderRegistry {
       enabled: options.enabled ?? true,
       config: options.config ?? {},
     })
-    if (this.#defaultId === undefined && (options.enabled ?? true)) this.#defaultId = id
+    if (this.#pendingDefaultId === id && (options.enabled ?? true)) {
+      this.#defaultId = id
+      this.#pendingDefaultId = undefined
+    } else if (this.#defaultId === undefined && (options.enabled ?? true)) {
+      this.#defaultId = id
+    }
     return () => {
-      this.#entries.delete(id)
-      if (this.#defaultId === id) this.#defaultId = this.#firstEnabledId()
+      if (this.#entries.get(id)?.provider === provider) this.unregister(id)
     }
   }
 
   /** Remove a provider by id. Returns whether anything was removed. */
   unregister(id: string): boolean {
     const removed = this.#entries.delete(id)
-    if (removed && this.#defaultId === id) this.#defaultId = this.#firstEnabledId()
+    if (removed && this.#defaultId === id) {
+      this.#defaultId = this.#firstEnabledId()
+      if (this.#pinnedDefaultId === id) this.#pendingDefaultId = id
+    }
     return removed
   }
 
@@ -178,13 +187,32 @@ export class DecisionProviderRegistry {
       enabled: entry.enabled,
       capabilities: [...entry.provider.capabilities],
       hasHealthCheck: typeof entry.provider.healthCheck === 'function',
-      isDefault: this.#defaultId === id,
+      isDefault: this.getDefaultId() === id,
     }))
   }
 
   /** The configured default provider id, or undefined when none is eligible. */
   getDefaultId(): string | undefined {
-    return this.#defaultId
+    return this.#pendingDefaultId === undefined ? this.#defaultId : undefined
+  }
+
+  /** A configured provider that has not yet been registered by its plugin. */
+  getPendingDefaultId(): string | undefined {
+    return this.#pendingDefaultId
+  }
+
+  /** Defer routing until an independently mounted provider registers this id. */
+  deferDefault(id: string): void {
+    if (id.trim() === '') throw new DecisionError('invalid_request', 'defaultProvider must be a non-empty string.')
+    this.#pinnedDefaultId = id
+    this.#pendingDefaultId = id
+  }
+
+  /** Use the first enabled provider without pinning a particular plugin id. */
+  resetDefault(): void {
+    this.#pinnedDefaultId = undefined
+    this.#pendingDefaultId = undefined
+    this.#defaultId = this.#firstEnabledId()
   }
 
   /**
@@ -196,6 +224,8 @@ export class DecisionProviderRegistry {
   setDefault(id: string): void {
     this.require(id)
     this.#defaultId = id
+    this.#pinnedDefaultId = id
+    this.#pendingDefaultId = undefined
   }
 
   /**
@@ -212,6 +242,12 @@ export class DecisionProviderRegistry {
         throw new DecisionError('invalid_request', 'provider must be a non-empty string when present.')
       }
       return { id: requestedId, provider: this.require(requestedId) }
+    }
+    if (this.#pendingDefaultId !== undefined) {
+      throw new DecisionError('provider_unknown', `Default decision provider "${this.#pendingDefaultId}" has not registered yet.`, {
+        subject: this.#pendingDefaultId,
+        details: { registered: [...this.#entries.keys()] },
+      })
     }
     const defaultId = this.#defaultId
     if (defaultId === undefined) {
@@ -279,6 +315,8 @@ export class DecisionProviderRegistry {
     }
     this.#entries.clear()
     this.#defaultId = undefined
+    this.#pendingDefaultId = undefined
+    this.#pinnedDefaultId = undefined
   }
 
   #firstEnabledId(): string | undefined {

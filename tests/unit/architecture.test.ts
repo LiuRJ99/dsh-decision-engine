@@ -132,8 +132,20 @@ describe('provider boundary', () => {
 
     // The provider set is open: a second family is registered through the same
     // generic seam, not by editing a provider-specific branch.
-    assert.match(code, /extraProviders\?:/)
-    assert.match(readFileSync(join(ROOT, 'src/assembly.ts'), 'utf8'), /providers\.register\(/)
+    assert.match(code, /providers\?: readonly ProviderSpec\[\]/)
+    const assembly = readFileSync(join(ROOT, 'src/assembly.ts'), 'utf8')
+    assert.match(assembly, /providers\.register\(/)
+    assert.ok(!importSpecifiers(assembly).some(specifier => specifier.includes('/providers/')),
+      'generic assembly must not import a concrete provider')
+  })
+
+  it('keeps concrete provider ids out of executable core and runtime code', () => {
+    for (const dir of CORE_DIRS) {
+      for (const file of sourceFiles(dir)) {
+        const code = stripComments(readFileSync(file, 'utf8'))
+        assert.ok(!/['"](?:laya|jev|decider)['"]/.test(code), `${file.replace(ROOT, '')} names a concrete provider`)
+      }
+    }
   })
 
   it('has no Laya import in the browser, computer, or custom environment adapters', () => {

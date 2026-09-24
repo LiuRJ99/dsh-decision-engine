@@ -89,6 +89,12 @@ export declare class DecisionProviderRegistry {
     list(): ProviderDescriptor[];
     /** The configured default provider id, or undefined when none is eligible. */
     getDefaultId(): string | undefined;
+    /** A configured provider that has not yet been registered by its plugin. */
+    getPendingDefaultId(): string | undefined;
+    /** Defer routing until an independently mounted provider registers this id. */
+    deferDefault(id: string): void;
+    /** Use the first enabled provider without pinning a particular plugin id. */
+    resetDefault(): void;
     /**
      * Set the default provider id.
      *

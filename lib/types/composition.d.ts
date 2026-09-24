@@ -9,7 +9,7 @@
  *
  * Two invariants this file owns:
  *
- * 1. The Laya provider is constructed by the shared assembly root. Deleting
+ * 1. Laya is supplied to the generic assembly as a ProviderSpec. Deleting
  *    `providers/laya/` leaves everything in
  *    `core/`, `runtime/`, `environments/`, or `tools/`.
  * 2. Environments are built over an injected {@link ToolDispatcher}, never over
@@ -20,16 +20,17 @@
  * @module dsh-decision-engine/composition
  */
 import z from '@deepseek-ai/schemastery';
+import { type ProviderSpec } from './assembly.ts';
 import type { DecisionEngine } from './core/decision-engine.ts';
 import type { DecisionProviderRegistry } from './core/provider-registry.ts';
 import { type DecisionTelemetry } from './core/telemetry.ts';
-import type { DecisionProvider } from './core/types.ts';
 import { EnvironmentRegistry } from './environments/registry.ts';
 import { type BrowserActionCandidate } from './environments/browser/adapter.ts';
 import { type ComputerSeam } from './environments/computer/adapter.ts';
 import type { ToolDispatcher } from './environments/dispatch.ts';
 import type { DecisionRuntime, RuntimeConfigInput } from './runtime/runner.ts';
 import type { DecisionEngineService } from './service.ts';
+export type { ProviderSpec } from './assembly.ts';
 /**
  * Plugin configuration. Mirrors the documented shape:
  *
@@ -61,18 +62,14 @@ export interface Config {
     /**
      * Per-provider settings, keyed by provider id.
      *
-     * `laya` is declared explicitly for schema validation; the Web settings
-     * card selects the common fields. Another family adds a sibling key.
-     * The index signature keeps an unknown provider id representable, because the
-     * file-backed settings document is user-editable and forward compatibility
-     * matters more here than a closed type.
+     * `laya` remains here for compatibility with existing settings. Other
+     * provider plugins own their private settings and register at runtime.
+     * The index signature preserves user-editable provider keys.
      */
     providers?: {
         /**
-         * The provider's own settings. Typed loosely here because the schema above
-         * describes these fields generically (it must not carry provider
-         * vocabulary); `LayaConfig` is the precise shape and
-         * `resolveLayaConfig` is what validates and defaults it.
+         * The provider's own settings. Laya validates these in its module;
+         * `LayaConfig` is the precise shape.
          */
         laya?: Record<string, unknown>;
         [providerId: string]: Record<string, unknown> | undefined;
@@ -135,8 +132,8 @@ export type { BrowserActionCandidate };
  *    settings card is registered separately by the client entry;
  * 3. `createDecisionEngineComposition` reads the defaults from it.
  *
- * `providers` stays a dict because provider-private settings belong under
- * `providers.<id>` — a second model family adds a key, not a schema field.
+ * `providers.laya` is the compatibility path for the bundled local model.
+ * Independently mounted providers validate their own settings namespace.
  */
 export declare const Config: z<Config>;
 /**
@@ -152,12 +149,12 @@ export declare function createDecisionEngineComposition(options: {
     computerSeam?: ComputerSeam;
     /** Read-only capability-gate query. */
     readCapabilityGate?: (capability: 'browser' | 'computer') => boolean | undefined;
-    /** Extra providers to register after the built-in ones. */
-    extraProviders?: Array<{
-        provider: DecisionProvider;
-        enabled?: boolean;
-        config?: Record<string, unknown>;
-    }>;
+    /** Provider instances supplied by the caller, alongside the local Laya adapter. */
+    providers?: readonly ProviderSpec[];
+    /** @deprecated Use `providers`. Kept for existing embedders. */
+    extraProviders?: readonly ProviderSpec[];
+    /** Host boot may wait for an independently mounted provider plugin. */
+    deferMissingDefault?: boolean;
 }): DecisionEngineComposition;
 /** The full composition, so callers and tests can reach every part directly. */
 export interface DecisionEngineComposition {

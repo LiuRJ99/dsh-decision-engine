@@ -1,6 +1,6 @@
 {
   "name": "dsh-decision-engine",
-  "version": "0.4.13",
+  "version": "0.4.14",
   "description": "Model-agnostic low-latency decision layer for DeepSeek Harness (DSH): a Decision Engine with pluggable Decision Providers, a finite-candidate decision protocol, and Browser / Computer / Custom environment adapters. Laya is the first provider, not the architecture.",
   "license": "MIT",
   "author": "LiuRJ99",
@@ -104,7 +104,8 @@
     "@deepseek-ai/dsh-llm": ">=0.1.2-rc.1 <0.2.0",
     "@deepseek-ai/dsh-settings": ">=0.1.2-rc.1 <0.2.0",
     "@deepseek-ai/dsh-system-prompt": ">=0.1.2-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-tools": ">=0.1.2-rc.1 <0.2.0"
+    "@deepseek-ai/dsh-tools": ">=0.1.2-rc.1 <0.2.0",
+    "@receptron/laya": "^0.1.1"
   },
   "peerDependenciesMeta": {
     "@receptron/laya": {
