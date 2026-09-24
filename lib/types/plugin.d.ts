@@ -9,9 +9,10 @@
  * @module dsh-decision-engine/plugin
  */
 import type { Context } from '@deepseek-ai/cordis';
+import type { Volatile } from '@deepseek-ai/cosmokit';
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools';
 import { type ToolCallRequest, type ToolCallResult, type ToolDispatcher } from './environments/dispatch.ts';
-import { type Config } from './composition.ts';
+import { Config as ConfigSchema, type Config as DecisionConfig } from './composition.ts';
 /** Cordis plugin name used by loader diagnostics. */
 export declare const name = "decision-engine";
 /** Host services this plugin requires. Everything else is consumed opportunistically. */
@@ -46,10 +47,11 @@ export declare class HostToolDispatcher implements ToolDispatcher {
  * the Web client entry registers a card inside the Plugins settings section.
  */
 export declare const SETTINGS_NAMESPACE: "decision-engine";
-export declare function apply(ctx: Context, config?: Config): void;
+export type Config = DecisionConfig;
+export declare const Config: import("@deepseek-ai/schemastery").default<NoInfer<ConfigSchema>, NoInfer<ConfigSchema>, "volatile">;
+export declare function apply(ctx: Context, config?: Config | Volatile<Config>): void;
 /** Re-export the public surface so a plugin consumer imports one module. */
 export { createDecisionEngineComposition } from './composition.ts';
-export type { Config } from './composition.ts';
 export * from './core/types.ts';
 export * from './core/errors.ts';
 export * from './core/telemetry.ts';

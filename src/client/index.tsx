@@ -15,7 +15,7 @@ interface SettingsSnapshot {
 interface SettingsScope {
   getSnapshot(): SettingsSnapshot
   subscribe(listener: () => void): () => void
-  mutate(ops: readonly SettingsOp[], expectedRevision?: number): Promise<void>
+  mutate(ops: readonly SettingsOp[], expectedRevision?: number): Promise<boolean>
 }
 interface SettingsOp {
   op: 'set' | 'unset'
@@ -24,7 +24,7 @@ interface SettingsOp {
 }
 type Draft = { kind: 'set'; value: string } | { kind: 'unset' }
 interface ClientContext {
-  settingsScope: { bind<T>(spec: { namespace: string }): T }
+  configForms: { get<T>(entryId: string): T }
   slots: {
     inject(name: string, register: () => unknown): void
     register(options: object, component: unknown): () => void
@@ -112,7 +112,7 @@ export function DecisionSettingsCard({ scope }: { scope: SettingsScope }) {
     setSaving(true)
     setMessage('')
     try {
-      await scope.mutate([write], editRevision.current)
+      if (!await scope.mutate([write], editRevision.current)) throw new Error('settings write was not accepted')
       const userValue = field(scope.getSnapshot().user, 'defaultProvider')
       if (write.op === 'set' ? userValue !== selected : userValue !== undefined) {
         throw new Error('settings write was not accepted')
@@ -163,10 +163,10 @@ export function DecisionSettingsCard({ scope }: { scope: SettingsScope }) {
   </li>
 }
 
-export const inject = ['slots', 'settingsScope']
+export const inject = ['slots', 'configForms']
 
 export function apply(ctx: ClientContext): void {
-  const scope = ctx.settingsScope.bind<SettingsScope>({ namespace: NAMESPACE })
+  const scope = ctx.configForms.get<SettingsScope>(NAMESPACE)
   ctx.effect(() => {
     const style = document.createElement('style')
     style.dataset.plugin = NAMESPACE
@@ -174,9 +174,11 @@ export function apply(ctx: ClientContext): void {
     document.head.appendChild(style)
     return () => style.remove()
   }, 'decision-engine settings styles')
-  ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
-    name: 'settings.plugin.item',
-    key: NAMESPACE,
+  ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
+    name: 'settings.plugins.tab',
+    id: NAMESPACE,
+    order: 30,
+    label: '决策引擎',
     inject: () => ({ scope }),
   }, DecisionSettingsCard))
 }

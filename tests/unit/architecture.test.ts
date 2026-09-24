@@ -199,9 +199,11 @@ describe('host dependency boundary', () => {
   it('imports only the public host packages, never a plugin internal path', () => {
     const allowed = new Set([
       '@deepseek-ai/cordis',
+      '@deepseek-ai/cosmokit',
       '@deepseek-ai/dsh-tools',
       '@deepseek-ai/dsh-agent',
       '@deepseek-ai/dsh-llm',
+      '@deepseek-ai/dsh-settings',
       '@deepseek-ai/dsh-util-values',
       '@deepseek-ai/dsh-system-prompt',
       '@deepseek-ai/schemastery',

@@ -9,7 +9,7 @@ interface SettingsSnapshot {
 interface SettingsScope {
     getSnapshot(): SettingsSnapshot;
     subscribe(listener: () => void): () => void;
-    mutate(ops: readonly SettingsOp[], expectedRevision?: number): Promise<void>;
+    mutate(ops: readonly SettingsOp[], expectedRevision?: number): Promise<boolean>;
 }
 interface SettingsOp {
     op: 'set' | 'unset';
@@ -17,10 +17,8 @@ interface SettingsOp {
     value?: string;
 }
 interface ClientContext {
-    settingsScope: {
-        bind<T>(spec: {
-            namespace: string;
-        }): T;
+    configForms: {
+        get<T>(entryId: string): T;
     };
     slots: {
         inject(name: string, register: () => unknown): void;

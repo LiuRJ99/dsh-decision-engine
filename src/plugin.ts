@@ -10,6 +10,8 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import type { Volatile } from '@deepseek-ai/cosmokit'
+import type {} from '@deepseek-ai/dsh-settings'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-tools'
@@ -17,7 +19,7 @@ import type {} from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { toDecisionFailure } from './core/errors.ts'
 import { toolFailure, type ToolCallRequest, type ToolCallResult, type ToolDispatcher } from './environments/dispatch.ts'
-import { Config as ConfigSchema, createDecisionEngineComposition, type Config } from './composition.ts'
+import { Config as ConfigSchema, createDecisionEngineComposition, type Config as DecisionConfig } from './composition.ts'
 import { defineDecideTool } from './tools/decision-decide.ts'
 import { defineRunTool } from './tools/decision-run.ts'
 import type { ToolExecutionScope } from './tools/execution-scope.ts'
@@ -118,20 +120,15 @@ function requestAgent(ctx: Context): Agent | undefined {
  */
 export const SETTINGS_NAMESPACE = 'decision-engine' as const
 
-/** The settings surface this plugin consumes, structurally typed. */
-interface SettingsSurface {
-  register(
-    ns: string,
-    schema: unknown,
-    options: { base?: unknown; applies?: 'live' | 'restart'; validate?: (value: Config) => void },
-  ): {
-    get(): unknown
-    watch(listener: () => void): () => void
-  }
-}
+export type Config = DecisionConfig
+export const Config = ConfigSchema.volatile()
 
-export function apply(ctx: Context, config: Config = {}): void {
-  if (config.enabled === false) return
+export function apply(ctx: Context, config: Config | Volatile<Config> = {}): void {
+  const entryConfig = (): Config => {
+    const settingsValue = ctx.get('settings')?.describe().find(entry => entry.ns === SETTINGS_NAMESPACE)?.value
+    return (settingsValue ?? ('get' in config ? config.get() : config)) as Config
+  }
+  if (entryConfig().enabled === false) return
 
   const execution = new AsyncLocalStorage<ToolRunContext>()
   const scope: ToolExecutionScope = (caller, work) => execution.run(caller, work)
@@ -140,18 +137,11 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   // The persisted section must be read before construction: provider and
   // environment changes marked "restart" need to shape the next instance.
-  const settings = ctx.get('settings') as unknown as SettingsSurface | undefined
-  const settingsScope = settings?.register(SETTINGS_NAMESPACE, ConfigSchema, {
-    base: config,
-    applies: 'live',
-    validate: (value: Config) => {
-      if (value.defaultProvider !== undefined && value.defaultProvider.trim() === '') {
-        throw new Error('defaultProvider must be a non-empty provider id')
-      }
-      validateRuntimeConfig({ ...DEFAULT_RUNTIME_CONFIG, ...value.runtime })
-    },
-  })
-  const initialConfig = settingsScope?.get() as Config | undefined ?? config
+  const initialConfig = entryConfig()
+  if (initialConfig.defaultProvider !== undefined && initialConfig.defaultProvider.trim() === '') {
+    throw new Error('defaultProvider must be a non-empty provider id')
+  }
+  validateRuntimeConfig({ ...DEFAULT_RUNTIME_CONFIG, ...initialConfig.runtime })
   if (initialConfig.enabled === false) return
 
   const composition = createDecisionEngineComposition({
@@ -195,11 +185,11 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   // Subsequent writes update live routing and budgets. Provider instances and
   // environment adapters are rebuilt from settings on the next host start.
-  if (settingsScope !== undefined) {
+  if (ctx.get('settings') !== undefined) {
     const applySettings = (): void => {
       let resolved: Config
       try {
-        resolved = settingsScope.get() as Config
+        resolved = entryConfig()
       } catch {
         return
       }
@@ -223,7 +213,9 @@ export function apply(ctx: Context, config: Config = {}): void {
         ctx.logger?.warn?.('decision-engine: settings change was not applied: %s', error instanceof Error ? error.message : String(error))
       }
     }
-    ctx.effect(() => settingsScope.watch(() => applySettings()), 'decision-engine settings watch')
+    ctx.on('settings/document-updated', (entryId) => {
+      if (entryId === SETTINGS_NAMESPACE) applySettings()
+    })
   }
 
   ctx.systemPrompt.section({
@@ -242,7 +234,6 @@ export function apply(ctx: Context, config: Config = {}): void {
 
 /** Re-export the public surface so a plugin consumer imports one module. */
 export { createDecisionEngineComposition } from './composition.ts'
-export type { Config } from './composition.ts'
 export * from './core/types.ts'
 export * from './core/errors.ts'
 export * from './core/telemetry.ts'

@@ -100,35 +100,35 @@ export declare const DEFAULT_SCORE_LEVELS: readonly ["a very poor choice", "a po
 /** Keep a loaded Laya session warm for ten idle minutes by default. */
 export declare const DEFAULT_LAYA_IDLE_TTL_MS: number;
 /** Host settings schema for Laya's own configuration. */
-export declare const LayaConfigSchema: z<Schemastery.ObjectS<{
-    enabled: z<boolean, boolean>;
-    modelDir: z<string, string>;
-    device: z<string, string>;
-    threads: z<number, number>;
-    autoLoad: z<boolean, boolean>;
-    idleTtlMs: z<number, number>;
-    required: z<boolean, boolean>;
-    strictCandidates: z<boolean, boolean>;
-    classificationBinaryMode: z<string, string>;
-    scoreLevels: z<string[], string[]>;
-    scoringMode: z<string, string>;
-    timeoutMs: z<number, number>;
-    maxStateChars: z<number, number>;
-}>, Schemastery.ObjectT<{
-    enabled: z<boolean, boolean>;
-    modelDir: z<string, string>;
-    device: z<string, string>;
-    threads: z<number, number>;
-    autoLoad: z<boolean, boolean>;
-    idleTtlMs: z<number, number>;
-    required: z<boolean, boolean>;
-    strictCandidates: z<boolean, boolean>;
-    classificationBinaryMode: z<string, string>;
-    scoreLevels: z<string[], string[]>;
-    scoringMode: z<string, string>;
-    timeoutMs: z<number, number>;
-    maxStateChars: z<number, number>;
-}>>;
+export declare const LayaConfigSchema: z<Schemastery.ObjectS<NoInfer<{
+    enabled: z<boolean, boolean, "defined">;
+    modelDir: z<string, string, "plain">;
+    device: z<string, string, "defined">;
+    threads: z<number, number, "plain">;
+    autoLoad: z<boolean, boolean, "defined">;
+    idleTtlMs: z<number, number, "defined">;
+    required: z<boolean, boolean, "defined">;
+    strictCandidates: z<boolean, boolean, "defined">;
+    classificationBinaryMode: z<string, string, "defined">;
+    scoreLevels: z<string[], string[], "plain">;
+    scoringMode: z<string, string, "defined">;
+    timeoutMs: z<number, number, "defined">;
+    maxStateChars: z<number, number, "defined">;
+}>>, Schemastery.ObjectT<NoInfer<{
+    enabled: z<boolean, boolean, "defined">;
+    modelDir: z<string, string, "plain">;
+    device: z<string, string, "defined">;
+    threads: z<number, number, "plain">;
+    autoLoad: z<boolean, boolean, "defined">;
+    idleTtlMs: z<number, number, "defined">;
+    required: z<boolean, boolean, "defined">;
+    strictCandidates: z<boolean, boolean, "defined">;
+    classificationBinaryMode: z<string, string, "defined">;
+    scoreLevels: z<string[], string[], "plain">;
+    scoringMode: z<string, string, "defined">;
+    timeoutMs: z<number, number, "defined">;
+    maxStateChars: z<number, number, "defined">;
+}>>, "plain">;
 /**
  * Resolve raw config (with optional environment fallbacks) into a fully
  * specified {@link ResolvedLayaConfig}.
