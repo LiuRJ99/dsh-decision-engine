@@ -182,6 +182,11 @@ in `providers/laya/modes.ts` and the global floor starts applying to it.
 
 ## Configuration
 
+Common options live in the first-level **Settings → Decision Engine** page.
+Provider, model residency, and execution budgets are separate collapsible groups.
+Browser and computer actions use the Host's capability gate when a task selects
+those environments; there is no environment switch in this page.
+
 ```yaml
 decisionEngine:
   enabled: true
@@ -201,13 +206,6 @@ decisionEngine:
     noProgressLimit: 3
     repeatedDecisionLimit: 3
 
-  browser:
-    enabled: true
-    includeNonSemantic: false # Prefer task-local opt-in for third-party controls.
-  computer:
-    enabled: true
-    # app: com.apple.TextEdit      # target app; omit until one is chosen
-    # captureTimeoutMs: 30000      # a capture that blocks on a permission prompt still settles
 ```
 
 Environment variables the Laya provider honours (read only inside

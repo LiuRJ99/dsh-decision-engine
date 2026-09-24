@@ -47,9 +47,3 @@
           maxDurationMs: 120000
           noProgressLimit: 3
           repeatedDecisionLimit: 3
-
-        browser:
-          enabled: true
-
-        computer:
-          enabled: true

@@ -28,10 +28,10 @@ interface ClientContext {
     };
     effect(install: () => () => void, label: string): void;
 }
-interface CardProps {
+interface SectionProps {
     scope: SettingsScope;
 }
-export declare function DecisionSettingsCard({ scope }: CardProps): import("react/jsx-runtime").JSX.Element | null;
+export declare function DecisionSettingsSection({ scope }: SectionProps): import("react/jsx-runtime").JSX.Element;
 export declare const inject: string[];
 export declare function apply(ctx: ClientContext): void;
 export {};

@@ -65,7 +65,7 @@ Browser / Computer / Custom / HTTP 环境适配器**一行都不用改**。
 
 ```bash
 # 从固定 tag 安装（本仓库推荐的方式）
-dsh plugin --profile web-candidate add github:LiuRJ99/dsh-decision-engine#v0.4.9
+dsh plugin --profile web-candidate add github:LiuRJ99/dsh-decision-engine#v0.4.10
 
 # 或用本地 checkout / release tarball
 dsh plugin --profile web-candidate add /path/to/dsh-decision-engine
@@ -197,7 +197,7 @@ Laya provider 报告 `provider_raw`，这是**测量结论**而不是保守选�
 ## 配置
 
 配置有三个来源，优先级从低到高：schema 默认值 → `cordis.patch.yml` 的 bundle 行 →
-设置面板写入的用户层。**常用配置可在 DSH Web「插件 → 插件配置」中调整**（见下节），
+设置面板写入的用户层。**常用配置可在 DSH Web「设置 → 决策引擎」中调整**（见下节），
 不必手改 YAML。
 
 ```yaml
@@ -230,20 +230,6 @@ decisionEngine:
     executeTimeoutMs: 90000
     stepDelayMs: 0
     stateFingerprintChars: 2000
-
-  browser:
-    enabled: true
-    includeNonSemantic: false       # 按任务开启更合适，见下文
-    maxCandidates: 12
-    maxStateChars: 6000
-
-  computer:
-    enabled: true
-    app: com.apple.TextEdit         # 用 bundle id，显示名经常解析不到
-    maxCandidates: 12
-    maxStateChars: 8000
-    maxTreeNodes: 1200
-    captureTimeoutMs: 30000         # 捕获卡住时的兜底
 
   telemetryLimit: 200
 ```
@@ -304,15 +290,15 @@ v0.3.0 起可在 `decision_run` / `decision_decide` 的 `browser` 参数中临�
 
 ### 通过内置设置面板配置
 
-Host 注册 `decision-engine` settings 命名空间，Web 客户端通过同名卡片展示常用项：
-默认 Provider、Laya 模型目录与驻留策略、执行预算，以及浏览器/电脑环境开关。
-未展示的高级配置仍可通过配置文件管理。
+Host 注册 `decision-engine` settings 命名空间，Web 客户端在设置侧栏提供独立的
+「决策引擎」页面。模型与 Provider、模型驻留、执行预算分组折叠；默认只展开第一组。
+浏览器和电脑没有页面开关：任务使用对应环境时，适配器才调用宿主工具，并沿用
+宿主的能力门控。未展示的高级配置仍可通过配置文件管理。
 
 面板行为：
 
 - **立即生效**：`defaultProvider` 和 `runtime.*`。后续决策与执行读取新值。
-- **重启后生效**：`providers.*`、`browser.*`、`computer.*`，以及插件级 `enabled`。
-  Laya 运行时和环境适配器在启动时创建，卡片会为这些字段标记「重启后生效」。
+- **重启后生效**：页面上的 `providers.*`。Laya 运行时在启动时创建，页面会标记这些字段。
 - 面板读到的是**已保存的解析值**：schema 默认、bundle 行、用户覆盖三层合并后的结果；
   只有你真正改过的字段才会被记为「用户覆盖」。
 - 未知 Provider ID 或无效预算会被 Host 拒绝。仅关闭 Laya 时，重启后可保持引擎运行并报告无可用 Provider。
