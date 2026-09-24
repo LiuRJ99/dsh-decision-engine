@@ -1,6 +1,6 @@
 {
   "name": "dsh-decision-engine",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Model-agnostic low-latency decision layer for DeepSeek Harness (DSH): a Decision Engine with pluggable Decision Providers, a finite-candidate decision protocol, and Browser / Computer / Custom environment adapters. Laya is the first provider, not the architecture.",
   "license": "MIT",
   "author": "LiuRJ99",
@@ -15,6 +15,10 @@
     "./plugin": {
       "types": "./lib/types/plugin.d.ts",
       "default": "./lib/plugin.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
     },
     "./embed": {
       "types": "./lib/types/embed.d.ts",
@@ -74,6 +78,13 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-plugins"
+      ]
     }
   },
   "scripts": {
@@ -89,8 +100,10 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
+    "react": ">=18.2.0 <19",
     "@deepseek-ai/dsh-agent": ">=0.1.2-rc.1 <0.2.0",
     "@deepseek-ai/dsh-llm": ">=0.1.2-rc.1 <0.2.0",
+    "@deepseek-ai/dsh-settings": ">=0.1.2-rc.1 <0.2.0",
     "@deepseek-ai/dsh-system-prompt": ">=0.1.2-rc.1 <0.2.0",
     "@deepseek-ai/dsh-tools": ">=0.1.2-rc.1 <0.2.0"
   },
@@ -112,7 +125,9 @@
     "@deepseek-ai/dsh-util-values": "0.1.5-rc.2",
     "@deepseek-ai/schemastery": "3.18.2",
     "@types/node": "^22.20.0",
+    "@types/react": "18.3.1",
     "esbuild": "^0.25.0",
+    "react": "18.2.0",
     "typescript": "^6.0.3"
   },
   "keywords": [

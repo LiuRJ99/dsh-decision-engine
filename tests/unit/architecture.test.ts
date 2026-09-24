@@ -133,7 +133,7 @@ describe('provider boundary', () => {
     // The provider set is open: a second family is registered through the same
     // generic seam, not by editing a provider-specific branch.
     assert.match(code, /extraProviders\?:/)
-    assert.match(code, /providers\.register\(/)
+    assert.match(readFileSync(join(ROOT, 'src/assembly.ts'), 'utf8'), /providers\.register\(/)
   })
 
   it('has no Laya import in the browser, computer, or custom environment adapters', () => {

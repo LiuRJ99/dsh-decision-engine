@@ -18,7 +18,7 @@
  * an install script, because git-hosted installs rely on committed artifacts.
  */
 import { build } from 'esbuild'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
@@ -60,10 +60,31 @@ for (const { entry, outfile } of ENTRIES) {
   })
 }
 
+// DSH's Web module loader expects a lazy CJS factory rather than a normal
+// browser ESM file. React is supplied by its module table; this package owns
+// only the card and its styles.
+const client = await build({
+  entryPoints: ['src/client/index.tsx'],
+  bundle: true,
+  format: 'cjs',
+  platform: 'browser',
+  target: ['es2022'],
+  external: ['react', 'react/jsx-runtime'],
+  write: false,
+  logLevel: 'warning',
+})
+const clientCode = client.outputFiles?.[0]?.text
+if (clientCode === undefined) throw new Error('client bundle produced no output')
+writeFileSync('lib/client.js',
+  'window.__ModuleLoader__.load({ id: "dsh-decision-engine", factory: (require) => {\n'
+  + 'var module = { exports: {} }; var exports = module.exports;\n'
+  + clientCode
+  + '\nreturn module.exports; } });\n')
+
 execFileSync(
   process.execPath,
   [fileURLToPath(import.meta.resolve('typescript/bin/tsc')), '-p', 'tsconfig.build.json'],
   { stdio: 'inherit' },
 )
 
-console.log(`built ${ENTRIES.length} entries + declarations`)
+console.log(`built ${ENTRIES.length} host entries + Web client + declarations`)

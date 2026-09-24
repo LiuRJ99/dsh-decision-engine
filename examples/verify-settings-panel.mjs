@@ -1,13 +1,11 @@
 /**
- * Settings-panel verification: register the plugin's settings namespace against
- * the **real** file-backed settings provider and inspect the descriptor the
- * built-in plugin settings panel consumes.
+ * Host settings verification: register the plugin namespace against the real
+ * file-backed settings provider. The Web card is verified separately.
  *
- * This is the check that "the panel renders our config" is true rather than
- * assumed. It exercises the same three things the panel does:
+ * It exercises the Host half of the settings flow:
  *
  * 1. `ctx.settings.describe()` lists the namespace with a serialized schema;
- * 2. that schema carries a description for every field (the panel's help text);
+ * 2. that schema carries field descriptions for other settings consumers;
  * 3. a write through `ctx.settings.update()` reaches the plugin's live engine,
  *    and the value the panel reads back is the one that took effect.
  *
@@ -80,7 +78,7 @@ const settingsPath = join(scratch, 'settings.yaml')
 const ctx = new Context()
 new SystemPrompt(ctx, {})
 new ToolRuntime(ctx)
-new FileSettingsProvider(ctx, { path: settingsPath, dshHome: scratch, watch: false, debounceMs: 0 })
+await ctx.plugin(FileSettingsProvider, { path: settingsPath, dshHome: scratch, watch: false, debounceMs: 0 })
 
 console.log(`host:     ${hostRoot}`)
 console.log(`settings: ${settingsPath}`)
@@ -96,16 +94,14 @@ apply(ctx, {
   computer: { enabled: true },
 })
 
-// `ctx.inject` defers its callback to the next microtask, so the registration
-// has not happened yet at the end of `apply()`. A real host has the same
-// behavior; wait a tick before asking the panel what it sees.
+// Let the provider finish its initial document load before inspection.
 await new Promise(resolve => setTimeout(resolve, 0))
 
 // --- 1. the namespace is discoverable -------------------------------------
 const listed = await ctx.settings.describe()
 const namespaces = Array.isArray(listed) ? listed : listed.namespaces ?? []
 const ours = namespaces.find(entry => entry.ns === SETTINGS_NAMESPACE)
-check('the settings panel can discover the namespace', ours !== undefined, namespaces.map(entry => entry.ns).join(', '))
+check('Host settings exposes the namespace', ours !== undefined, namespaces.map(entry => entry.ns).join(', '))
 
 if (ours === undefined) {
   rmSync(scratch, { recursive: true, force: true })
@@ -122,7 +118,7 @@ check('the schema carries field descriptions for the panel', descriptionCount >=
 for (const field of ['defaultProvider', 'confidenceThreshold', 'maxSteps', 'autoLoad', 'idleTtlMs', 'captureTimeoutMs']) {
   check(`"${field}" is present in the rendered schema`, schemaText.includes(field))
 }
-check('the panel is told changes apply live', ours.applies === 'live', String(ours.applies))
+check('the settings descriptor marks live fields', ours.applies === 'live', String(ours.applies))
 
 // --- 3. values reflect the composition base -------------------------------
 const value = ours.value
@@ -152,6 +148,33 @@ try {
   refused = true
 }
 check('an invalid value is refused by the schema', refused)
+
+// --- 6. restart-required fields shape the next composition ---------------
+await ctx.settings.update(SETTINGS_NAMESPACE, {
+  providers: { laya: { enabled: false } },
+  browser: { enabled: false },
+})
+check('provider and environment changes leave the running instance intact',
+  ctx.decisionEngine.providers.has('laya') && ctx.decisionEngine.environments.ids().includes('browser'))
+check('restart-required overrides reached the settings file',
+  readFileSync(settingsPath, 'utf8').includes('enabled: false'))
+
+const restarted = new Context()
+new SystemPrompt(restarted, {})
+new ToolRuntime(restarted)
+await restarted.plugin(FileSettingsProvider, { path: settingsPath, dshHome: scratch, watch: false, debounceMs: 0 })
+apply(restarted, {
+  enabled: true,
+  defaultProvider: 'laya',
+  providers: { laya: { enabled: true, device: 'cpu' } },
+  browser: { enabled: true },
+  computer: { enabled: true },
+})
+const nextDescribe = await restarted.settings.describe()
+const nextEntry = (Array.isArray(nextDescribe) ? nextDescribe : nextDescribe.namespaces ?? []).find(entry => entry.ns === SETTINGS_NAMESPACE)
+check('saved provider and environment switches apply on the next construction',
+  !restarted.decisionEngine.providers.has('laya') && !restarted.decisionEngine.environments.ids().includes('browser'),
+  `providers=${restarted.decisionEngine.providers.ids()} environments=${restarted.decisionEngine.environments.ids()} user=${JSON.stringify(nextEntry?.user)}`)
 
 rmSync(scratch, { recursive: true, force: true })
 

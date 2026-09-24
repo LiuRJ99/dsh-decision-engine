@@ -180,10 +180,6 @@ export function preflightDecideInput(input: DecideToolInput, service: DecisionEn
   if (capability !== undefined && service.isCapabilityUnlocked(capability) === false) {
     return `decision_decide: the ${capability} capability is not authorized in this session. The user must invoke /${GATE_SKILL_NAMES[capability]} first; this tool cannot unlock it.`
   }
-  if (input.allowRisky === true) {
-    // Allowed, but the runtime still refuses per-action unless the caller opted in.
-    return undefined
-  }
   return undefined
 }
 

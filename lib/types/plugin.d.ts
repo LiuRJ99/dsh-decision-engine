@@ -42,11 +42,8 @@ export declare class HostToolDispatcher implements ToolDispatcher {
 /**
  * Settings namespace the plugin owns.
  *
- * Registering it is what makes the **built-in plugin settings panel** render this
- * plugin's configuration: the panel discovers namespaces from the settings
- * service and renders each one's schemastery schema, which is why every field in
- * `Config` carries a `.description()`. Nothing bespoke is needed here — the same
- * mechanism that renders the lazy gate's capability list renders this.
+ * The host settings namespace supplies the resolved data and write endpoint;
+ * the Web client entry registers the visual card in the plugin settings slot.
  */
 export declare const SETTINGS_NAMESPACE: "decision-engine";
 export declare function apply(ctx: Context, config?: Config): void;

@@ -197,7 +197,7 @@ Laya provider 报告 `provider_raw`，这是**测量结论**而不是保守选�
 ## 配置
 
 配置有三个来源，优先级从低到高：schema 默认值 → `cordis.patch.yml` 的 bundle 行 →
-设置面板写入的用户层。**改配置最简单的方式是内置的插件设置面板**（见下节），
+设置面板写入的用户层。**常用配置可在 DSH Web「插件 → 插件配置」中调整**（见下节），
 不必手改 YAML。
 
 ```yaml
@@ -304,19 +304,18 @@ v0.3.0 起可在 `decision_run` / `decision_decide` 的 `browser` 参数中临�
 
 ### 通过内置设置面板配置
 
-插件注册了 `decision-engine` 这个 settings 命名空间，所以 DSH 内置的**插件设置面板**
-会自动渲染上面这些字段（含每个字段的说明文字）—— 用的是和 lazy-gate 能力列表同一套机制，
-不需要任何自定义前端。
+Host 注册 `decision-engine` settings 命名空间，Web 客户端通过同名卡片展示常用项：
+默认 Provider、Laya 模型目录与驻留策略、执行预算，以及浏览器/电脑环境开关。
+未展示的高级配置仍可通过配置文件管理。
 
 面板行为：
 
-- **立即生效的字段**：`enabled`、`defaultProvider`、`providers.*`、`runtime.*`。
-  写入后引擎、运行时限额、模型驻留设置立刻被重新配置，无需重启。
-- **需要重启的字段**：`browser.*`、`computer.*`。这两个环境适配器在观察之间持有内部状态
-  （浏览器的元素编号清单、无障碍树的合并基准），热替换会静默失效，所以刻意不热更新。
-- 面板读到的值是**当前生效值**：schema 默认、bundle 行、用户覆盖三层合并后的结果；
+- **立即生效**：`defaultProvider` 和 `runtime.*`。后续决策与执行读取新值。
+- **重启后生效**：`providers.*`、`browser.*`、`computer.*`，以及插件级 `enabled`。
+  Laya 运行时和环境适配器在启动时创建，卡片会为这些字段标记「重启后生效」。
+- 面板读到的是**已保存的解析值**：schema 默认、bundle 行、用户覆盖三层合并后的结果；
   只有你真正改过的字段才会被记为「用户覆盖」。
-- 非法值会被 schema 拒绝，不会写进配置文件。
+- 未知 Provider ID 或无效预算会被 Host 拒绝。仅关闭 Laya 时，重启后可保持引擎运行并报告无可用 Provider。
 
 配置文档落在 `$DSH_HOME/settings.yaml` 的 `decision-engine` 段（由 settings provider 管理）。
 

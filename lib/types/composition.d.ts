@@ -9,8 +9,8 @@
  *
  * Two invariants this file owns:
  *
- * 1. The Laya provider is constructed here and nowhere else. Deleting
- *    `providers/laya/` breaks exactly this file's import and nothing in
+ * 1. The Laya provider is constructed by the shared assembly root. Deleting
+ *    `providers/laya/` leaves everything in
  *    `core/`, `runtime/`, `environments/`, or `tools/`.
  * 2. Environments are built over an injected {@link ToolDispatcher}, never over
  *    a concrete transport. Whether that dispatcher is the host tool registry or
@@ -20,15 +20,15 @@
  * @module dsh-decision-engine/composition
  */
 import z from '@deepseek-ai/schemastery';
-import { DecisionEngine } from './core/decision-engine.ts';
-import { DecisionProviderRegistry } from './core/provider-registry.ts';
+import type { DecisionEngine } from './core/decision-engine.ts';
+import type { DecisionProviderRegistry } from './core/provider-registry.ts';
 import { type DecisionTelemetry } from './core/telemetry.ts';
 import type { DecisionProvider } from './core/types.ts';
 import { EnvironmentRegistry } from './environments/registry.ts';
 import { type BrowserActionCandidate } from './environments/browser/adapter.ts';
 import { type ComputerSeam } from './environments/computer/adapter.ts';
 import type { ToolDispatcher } from './environments/dispatch.ts';
-import { DecisionRuntime, type RuntimeConfigInput } from './runtime/runner.ts';
+import type { DecisionRuntime, RuntimeConfigInput } from './runtime/runner.ts';
 import type { DecisionEngineService } from './service.ts';
 /**
  * Plugin configuration. Mirrors the documented shape:
@@ -61,8 +61,8 @@ export interface Config {
     /**
      * Per-provider settings, keyed by provider id.
      *
-     * `laya` is declared explicitly so the settings panel renders its fields
-     * instead of an opaque dict; an additional provider family adds a sibling key.
+     * `laya` is declared explicitly for schema validation; the Web settings
+     * card selects the common fields. Another family adds a sibling key.
      * The index signature keeps an unknown provider id representable, because the
      * file-backed settings document is user-editable and forward compatibility
      * matters more here than a closed type.
@@ -131,9 +131,8 @@ export type { BrowserActionCandidate };
  * Three uses at once, which is why it lives here rather than in `plugin.ts`:
  *
  * 1. the loader validates `cordis.patch.yml` against it;
- * 2. `ctx.settings.register` uses it to render the **plugin settings panel** —
- *    every `.description()` below is the help text that panel shows, so a field
- *    without one is a field a user has to guess at;
+ * 2. `ctx.settings.register` validates and resolves host settings. The Web
+ *    settings card is registered separately by the client entry;
  * 3. `createDecisionEngineComposition` reads the defaults from it.
  *
  * `providers` stays a dict because provider-private settings belong under
@@ -168,6 +167,8 @@ export interface DecisionEngineComposition {
     environments: EnvironmentRegistry;
     runtime: DecisionRuntime;
     telemetryRecords: DecisionTelemetry[];
+    /** Repoint the active default and retain a disabled requested id for health. */
+    setDefaultProvider(id?: string): void;
     dispose(): Promise<void>;
 }
 //# sourceMappingURL=composition.d.ts.map

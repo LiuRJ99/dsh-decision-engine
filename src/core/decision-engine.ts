@@ -110,7 +110,7 @@ export interface EngineDecideOptions {
 export class DecisionEngine {
   readonly #registry: DecisionProviderRegistry
   readonly #router: DecisionRouter
-  readonly #config: Required<Pick<DecisionEngineConfig, 'confidenceThreshold' | 'timeoutMs' | 'allowCapabilityFallback'>>
+  readonly #config: Required<Pick<DecisionEngineConfig, 'confidenceThreshold' | 'timeoutMs'>>
   #telemetry: DecisionTelemetrySink | undefined
   readonly #now: () => number
 
@@ -123,7 +123,6 @@ export class DecisionEngine {
     this.#config = {
       confidenceThreshold: config.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD,
       timeoutMs: config.timeoutMs ?? 30_000,
-      allowCapabilityFallback: config.allowCapabilityFallback ?? true,
     }
     this.#telemetry = config.telemetry
     this.#now = config.now ?? defaultClock
@@ -159,8 +158,10 @@ export class DecisionEngine {
   reconfigure(config: DecisionEngineConfig): void {
     if (config.confidenceThreshold !== undefined) this.#config.confidenceThreshold = config.confidenceThreshold
     if (config.timeoutMs !== undefined) this.#config.timeoutMs = config.timeoutMs
-    if (config.allowCapabilityFallback !== undefined) this.#config.allowCapabilityFallback = config.allowCapabilityFallback
-    if (config.defaultProviderId !== undefined) this.#router.setDefaultProvider(config.defaultProviderId)
+    if (config.allowCapabilityFallback !== undefined) this.#router.setAllowCapabilityFallback(config.allowCapabilityFallback)
+    if (config.defaultProviderId !== undefined) {
+      this.#router.setDefaultProvider(config.defaultProviderId)
+    }
     if (config.telemetry !== undefined) this.#setTelemetry(config.telemetry)
   }
 

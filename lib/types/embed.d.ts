@@ -23,13 +23,13 @@
  *
  * @module dsh-decision-engine/embed
  */
-import { DecisionEngine } from './core/decision-engine.ts';
-import { DecisionProviderRegistry } from './core/provider-registry.ts';
+import type { DecisionEngine } from './core/decision-engine.ts';
+import type { DecisionProviderRegistry } from './core/provider-registry.ts';
 import type { DecisionProvider, DecisionRequest, DecisionResult } from './core/types.ts';
 import type { DecisionTelemetry, DecisionTelemetrySink } from './core/telemetry.ts';
 import { EnvironmentRegistry } from './environments/registry.ts';
 import type { EnvironmentAdapter, Objective } from './environments/types.ts';
-import { DecisionRuntime, type ExecutionMode, type RunOptions, type RuntimeConfig, type RuntimeConfigInput, type RuntimeOutcome, type TaskOptions, type TaskOutcome } from './runtime/runner.ts';
+import type { DecisionRuntime, ExecutionMode, RunOptions, RuntimeConfig, RuntimeConfigInput, RuntimeOutcome, TaskOptions, TaskOutcome } from './runtime/runner.ts';
 import { CustomEnvironmentAdapter, type CustomEnvironmentSpec } from './environments/custom/adapter.ts';
 import type { LayaConfig } from './providers/laya/config.ts';
 import type { DecisionEngineHealth } from './service.ts';

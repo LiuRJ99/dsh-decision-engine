@@ -9,8 +9,8 @@
  *
  * Two invariants this file owns:
  *
- * 1. The Laya provider is constructed here and nowhere else. Deleting
- *    `providers/laya/` breaks exactly this file's import and nothing in
+ * 1. The Laya provider is constructed by the shared assembly root. Deleting
+ *    `providers/laya/` leaves everything in
  *    `core/`, `runtime/`, `environments/`, or `tools/`.
  * 2. Environments are built over an injected {@link ToolDispatcher}, never over
  *    a concrete transport. Whether that dispatcher is the host tool registry or
@@ -21,19 +21,19 @@
  */
 
 import z from '@deepseek-ai/schemastery'
-import { DecisionEngine } from './core/decision-engine.ts'
-import { DecisionProviderRegistry } from './core/provider-registry.ts'
+import { aggregateDecisionHealth, assembleDecisionCore } from './assembly.ts'
+import type { DecisionEngine } from './core/decision-engine.ts'
 import { DecisionError } from './core/errors.ts'
-import { createRingBufferSink, type DecisionTelemetry, type DecisionTelemetrySink } from './core/telemetry.ts'
+import type { DecisionProviderRegistry } from './core/provider-registry.ts'
+import { createRingBufferSink, type DecisionTelemetry } from './core/telemetry.ts'
 import type { DecisionProvider } from './core/types.ts'
 import { EnvironmentRegistry } from './environments/registry.ts'
 import { BrowserEnvironmentAdapter, type BrowserActionCandidate } from './environments/browser/adapter.ts'
 import { ComputerEnvironmentAdapter, type ComputerAdapterConfig, type ComputerSeam } from './environments/computer/adapter.ts'
 import type { ToolDispatcher } from './environments/dispatch.ts'
-import { DecisionRuntime, type RuntimeConfigInput } from './runtime/runner.ts'
-import { LayaDecisionProvider } from './providers/laya/provider.ts'
+import type { DecisionRuntime, RuntimeConfigInput } from './runtime/runner.ts'
 import type { LayaConfig } from './providers/laya/config.ts'
-import type { DecisionEngineHealth, DecisionEngineService } from './service.ts'
+import type { DecisionEngineService } from './service.ts'
 
 /**
  * Plugin configuration. Mirrors the documented shape:
@@ -66,8 +66,8 @@ export interface Config {
   /**
    * Per-provider settings, keyed by provider id.
    *
-   * `laya` is declared explicitly so the settings panel renders its fields
-   * instead of an opaque dict; an additional provider family adds a sibling key.
+   * `laya` is declared explicitly for schema validation; the Web settings
+   * card selects the common fields. Another family adds a sibling key.
    * The index signature keeps an unknown provider id representable, because the
    * file-backed settings document is user-editable and forward compatibility
    * matters more here than a closed type.
@@ -141,9 +141,8 @@ export type { BrowserActionCandidate }
  * Three uses at once, which is why it lives here rather than in `plugin.ts`:
  *
  * 1. the loader validates `cordis.patch.yml` against it;
- * 2. `ctx.settings.register` uses it to render the **plugin settings panel** —
- *    every `.description()` below is the help text that panel shows, so a field
- *    without one is a field a user has to guess at;
+ * 2. `ctx.settings.register` validates and resolves host settings. The Web
+ *    settings card is registered separately by the client entry;
  * 3. `createDecisionEngineComposition` reads the defaults from it.
  *
  * `providers` stays a dict because provider-private settings belong under
@@ -157,11 +156,8 @@ export const Config: z<Config> = z.object({
     'Provider id used when a request does not name one (for example "laya"). Leave empty to use the first enabled provider.',
   ),
   providers: z.object({
-    // A named sub-object rather than a dict on purpose: a dict renders as an
-    // opaque `{}` in the settings panel, which would hide every provider knob
-    // (model path, residency, device) behind a hand-edited YAML file. A second
-    // provider family adds a sibling key here — provider-private settings still
-    // live under `providers.<id>`, never as top-level fields.
+    // A named sub-object validates Laya's fields. A second provider family
+    // adds a sibling key; provider-private fields stay under `providers.<id>`.
     laya: z.object({
       enabled: z.boolean().default(true).description('Whether the Laya provider is registered. Turn off to run the layer without a model.'),
       modelDir: z.string().description(
@@ -277,56 +273,11 @@ export function createDecisionEngineComposition(options: {
 }): DecisionEngineComposition {
   const config = options.config ?? {}
   const { sink, records } = createRingBufferSink(config.telemetryLimit ?? 200)
-  const telemetry: DecisionTelemetrySink = sink
-
-  const providers = new DecisionProviderRegistry()
-  const layaConfig = (config.providers?.laya ?? {}) as LayaConfig
-  const layaEnabled = layaConfig.enabled ?? true
-  const disposers: Array<() => void> = []
-  // The Laya provider is registered HERE and nowhere else. That single fact is
-  // what makes `import` direction enforceable: core, runtime, environments, and
-  // tools never mention it, so deleting providers/laya/ cannot break them.
-  if (layaEnabled) {
-    disposers.push(providers.register(new LayaDecisionProvider({ config: layaConfig }), {
-      enabled: true,
-      config: { ...layaConfig },
-    }))
-  }
-  for (const extra of options.extraProviders ?? []) {
-    disposers.push(providers.register(extra.provider, {
-      ...extra.enabled === undefined ? {} : { enabled: extra.enabled },
-      ...extra.config === undefined ? {} : { config: extra.config },
-    }))
-  }
-
-  const configuredDefault = config.defaultProvider
-  if (configuredDefault !== undefined && providers.has(configuredDefault)) {
-    const entry = providers.entry(configuredDefault)
-    if (entry?.enabled === true) providers.setDefault(configuredDefault)
-  } else if (configuredDefault !== undefined) {
-    // Naming a provider that is not registered is a configuration mistake worth
-    // failing on: it can only happen if nothing provides that id.
-    throw new DecisionError('provider_unknown', `defaultProvider "${configuredDefault}" is not a registered provider.`, {
-      subject: configuredDefault,
-      details: { registered: providers.ids() },
-    })
-  }
-  // A registered-but-disabled default is not fatal: the deployment deliberately
-  // turned that provider off, so the registry's own first-enabled fallback
-  // applies. The mismatch stays visible through `health()`.
-  const requestedDefault = configuredDefault
-
-  const engine = new DecisionEngine({
-    ...configuredDefault === undefined ? {} : { defaultProviderId: configuredDefault },
-    ...config.runtime?.confidenceThreshold === undefined ? {} : { confidenceThreshold: config.runtime.confidenceThreshold },
-    ...config.runtime?.observeTimeoutMs === undefined ? {} : { timeoutMs: config.runtime.observeTimeoutMs },
-    telemetry,
-  }, providers)
 
   const environments = new EnvironmentRegistry()
   if (config.browser?.enabled ?? true) {
     const browserCandidates = config.browser?.candidates as BrowserActionCandidate[] | undefined
-    disposers.push(environments.register(new BrowserEnvironmentAdapter({
+    environments.register(new BrowserEnvironmentAdapter({
       ...config.browser?.environmentId === undefined ? {} : { id: config.browser.environmentId },
       dispatcher: options.dispatcher,
       config: {
@@ -337,7 +288,7 @@ export function createDecisionEngineComposition(options: {
         ...config.browser?.maxCandidates === undefined ? {} : { maxCandidates: config.browser.maxCandidates },
         ...config.browser?.maxStateChars === undefined ? {} : { maxStateChars: config.browser.maxStateChars },
       },
-    })))
+    }))
   }
   if (config.computer?.enabled ?? true) {
     const computerConfig: ComputerAdapterConfig = {
@@ -347,19 +298,37 @@ export function createDecisionEngineComposition(options: {
       ...config.computer?.maxTreeNodes === undefined ? {} : { maxTreeNodes: config.computer.maxTreeNodes },
       ...config.computer?.captureTimeoutMs === undefined ? {} : { captureTimeoutMs: config.computer.captureTimeoutMs },
     }
-    disposers.push(environments.register(new ComputerEnvironmentAdapter({
+    environments.register(new ComputerEnvironmentAdapter({
       ...config.computer?.environmentId === undefined ? {} : { id: config.computer.environmentId },
       ...options.computerSeam === undefined ? {} : { seam: options.computerSeam },
       dispatcher: options.dispatcher,
       config: computerConfig,
-    })))
+    }))
   }
 
-  const runtime = new DecisionRuntime(engine, {
-    ...config.runtime === undefined ? {} : { config: config.runtime },
-    telemetry,
+  const layaConfig = (config.providers?.laya ?? {}) as LayaConfig
+  const { providers, engine, runtime } = assembleDecisionCore({
+    laya: layaConfig.enabled === false ? false : layaConfig,
+    ...options.extraProviders === undefined ? {} : { extraProviders: options.extraProviders },
+    ...config.defaultProvider === undefined ? {} : { defaultProvider: config.defaultProvider },
+    ...config.runtime === undefined ? {} : { runtime: config.runtime },
+    ...config.runtime?.confidenceThreshold === undefined ? {} : { confidenceThreshold: config.runtime.confidenceThreshold },
+    ...config.runtime?.observeTimeoutMs === undefined ? {} : { timeoutMs: config.runtime.observeTimeoutMs },
+    telemetry: sink,
     environments,
   })
+
+  let requestedDefault = config.defaultProvider
+  const setDefaultProvider = (requested?: string): void => {
+    if (requested !== undefined && !providers.has(requested)
+      && !(requested === 'laya' && layaConfig.enabled === false)) {
+      throw new DecisionError('provider_unknown', `defaultProvider "${requested}" is not registered`)
+    }
+    const active = requested !== undefined && providers.entry(requested)?.enabled
+      ? requested : providers.enabledIds()[0]
+    if (active !== undefined) engine.reconfigure({ defaultProviderId: active })
+    requestedDefault = requested
+  }
 
   const service: DecisionEngineService = {
     engine,
@@ -378,26 +347,8 @@ export function createDecisionEngineComposition(options: {
     run: runOptions => runtime.run(runOptions),
     runTask: taskOptions => runtime.runTask(taskOptions),
     isCapabilityUnlocked: capability => options.readCapabilityGate?.(capability),
-    health: async (): Promise<DecisionEngineHealth> => {
-      const providerHealth = await providers.health()
-      const statuses = Object.values(providerHealth).map(entry => entry.status)
-      const status = statuses.length === 0 || statuses.every(entry => entry === 'unavailable')
-        ? 'unavailable'
-        : statuses.every(entry => entry === 'ok')
-          ? 'ok'
-          : 'degraded'
-      const defaultProvider = providers.getDefaultId()
-      return {
-        status,
-        ...defaultProvider === undefined ? {} : { defaultProvider },
-        ...requestedDefault === undefined || requestedDefault === defaultProvider
-          ? {}
-          : { requestedDefaultProvider: requestedDefault },
-        providers: providerHealth,
-        environments: environments.ids(),
-        telemetryRecords: records.length,
-      }
-    },
+    health: () => aggregateDecisionHealth({ providers, environments, records,
+      ...requestedDefault === undefined ? {} : { requestedDefault } }),
     telemetry: () => records,
     dispose: async () => {
       await environments.disposeAll()
@@ -412,10 +363,8 @@ export function createDecisionEngineComposition(options: {
     environments,
     runtime,
     telemetryRecords: records,
-    dispose: async () => {
-      await service.dispose()
-      for (const dispose of disposers.reverse()) dispose()
-    },
+    setDefaultProvider,
+    dispose: () => service.dispose(),
   }
 }
 
@@ -427,5 +376,7 @@ export interface DecisionEngineComposition {
   environments: EnvironmentRegistry
   runtime: DecisionRuntime
   telemetryRecords: DecisionTelemetry[]
+  /** Repoint the active default and retain a disabled requested id for health. */
+  setDefaultProvider(id?: string): void
   dispose(): Promise<void>
 }

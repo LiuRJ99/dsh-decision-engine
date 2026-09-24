@@ -26,7 +26,6 @@ export interface RouteResult {
  */
 export class DecisionRouter {
   readonly #registry: DecisionProviderRegistry
-  #defaultProviderId: string | undefined
   #allowCapabilityFallback: boolean
 
   /**
@@ -35,13 +34,13 @@ export class DecisionRouter {
    */
   constructor(registry: DecisionProviderRegistry, options: { defaultProviderId?: string; allowCapabilityFallback?: boolean } = {}) {
     this.#registry = registry
-    this.#defaultProviderId = options.defaultProviderId
+    if (options.defaultProviderId !== undefined) this.#registry.setDefault(options.defaultProviderId)
     this.#allowCapabilityFallback = options.allowCapabilityFallback ?? true
   }
 
   /** The configured default provider id, if any. */
   get defaultProviderId(): string | undefined {
-    return this.#defaultProviderId
+    return this.#registry.getDefaultId()
   }
 
   /** Whether a capability miss may fall back to another enabled provider. */
@@ -57,8 +56,8 @@ export class DecisionRouter {
    * @throws DecisionError with `provider_unknown` or `provider_unavailable`.
    */
   setDefaultProvider(id: string | undefined): void {
-    if (id !== undefined) this.#registry.require(id)
-    this.#defaultProviderId = id
+    const next = id ?? this.#registry.enabledIds()[0]
+    if (next !== undefined) this.#registry.setDefault(next)
   }
 
   /** Allow or forbid capability fallback. */
@@ -88,7 +87,7 @@ export class DecisionRouter {
       return { providerId, reason: 'explicit' }
     }
 
-    const preferred = this.#defaultProviderId
+    const preferred = this.#registry.getDefaultId()
     if (preferred !== undefined) {
       const provider = this.#registry.require(preferred)
       if (provider.capabilities.includes(mode)) return { providerId: preferred, reason: 'default' }

@@ -16,7 +16,7 @@ import { createMapDispatcher } from '../../src/environments/dispatch.ts'
 import { CustomEnvironmentAdapter } from '../../src/environments/custom/adapter.ts'
 import { DecisionError } from '../../src/core/errors.ts'
 import { executeDecide, executionModeOf, renderDecideOutput } from '../../src/tools/decide-logic.ts'
-import { ScriptedProvider } from '../helpers.ts'
+import { constantProvider, ScriptedProvider } from '../helpers.ts'
 
 /** The documented minimal request from the specification. */
 const MINIMAL = {
@@ -246,11 +246,41 @@ describe('composition lifecycle', () => {
     }), (error: unknown) => error instanceof DecisionError && error.code === 'provider_unknown')
   })
 
+  it('routes through the active provider when the requested default is disabled', async () => {
+    const created = createDecisionEngineComposition({
+      config: { defaultProvider: 'off', providers: { laya: { enabled: false } } },
+      dispatcher: createMapDispatcher({}),
+      extraProviders: [
+        { provider: constantProvider('open', { id: 'off' }), enabled: false },
+        { provider: constantProvider('open', { id: 'active' }) },
+      ],
+    })
+    const health = await created.service.health()
+    assert.equal(health.defaultProvider, 'active')
+    assert.equal(health.requestedDefaultProvider, 'off')
+    assert.equal((await created.service.decide(MINIMAL)).provider, 'active')
+    created.setDefaultProvider('active')
+    assert.equal((await created.service.health()).requestedDefaultProvider, undefined)
+  })
+
   it('registers the Laya provider by default and can disable it', () => {
     const withLaya = createDecisionEngineComposition({ dispatcher: createMapDispatcher({}) })
     assert.deepEqual(withLaya.providers.ids(), ['laya'])
     const withoutLaya = createDecisionEngineComposition({ config: { providers: { laya: { enabled: false } } }, dispatcher: createMapDispatcher({}) })
     assert.deepEqual(withoutLaya.providers.ids(), [])
+  })
+
+  it('starts without a provider when Laya is disabled but remains the configured default', async () => {
+    const created = createDecisionEngineComposition({
+      config: { defaultProvider: 'laya', providers: { laya: { enabled: false } } },
+      dispatcher: createMapDispatcher({}),
+    })
+    const health = await created.service.health()
+    assert.equal(health.status, 'unavailable')
+    assert.equal(health.defaultProvider, undefined)
+    assert.equal(health.requestedDefaultProvider, 'laya')
+    await assert.rejects(created.service.decide(MINIMAL), (error: unknown) =>
+      error instanceof DecisionError && error.code === 'provider_unavailable')
   })
 
   it('keeps telemetry records on the composition for diagnostics', async () => {

@@ -19,6 +19,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
+import { runInNewContext } from 'node:vm'
 
 const packageDir = join(import.meta.dirname, '..')
 const pkg = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'))
@@ -33,6 +35,7 @@ const scratch = join(import.meta.dirname, '..', '.exports-check')
 rmSync(scratch, { recursive: true, force: true })
 mkdirSync(join(scratch, 'node_modules'), { recursive: true })
 symlinkSync(packageDir, join(scratch, 'node_modules', pkg.name), 'dir')
+const requireFromScratch = createRequire(join(scratch, 'resolver.cjs'))
 /**
  * Import a specifier as a module *inside* the scratch directory, so Node
  * resolves it from there. A resolver helper cannot be used: dynamic
@@ -75,6 +78,18 @@ const entries = Object.keys(pkg.exports).filter(key => key !== './plugin' && !NO
 for (const key of entries) {
   const specifier = key === '.' ? pkg.name : `${pkg.name}/${key.replace(/^\.\//, '')}`
   try {
+    if (key === './client') {
+      // Browser entries are lazy-CJS factories and cannot be imported by Node.
+      const path = requireFromScratch.resolve(specifier)
+      let loaded
+      runInNewContext(readFileSync(path, 'utf8'), {
+        window: { __ModuleLoader__: { load: entry => { loaded = entry } } },
+      })
+      const client = loaded?.factory?.(() => ({}))
+      check('exports["./client"] loads in the Web module loader',
+        loaded?.id === pkg.name && typeof client?.apply === 'function' && Array.isArray(client?.inject))
+      continue
+    }
     const module = await resolveFrom(specifier)
     const names = Object.keys(module)
     check(`exports["${key}"] loads`, true, `${names.length} export(s)`)
@@ -129,4 +144,3 @@ if (failed.length > 0) {
   process.exitCode = 1
   for (const failure of failed) console.error(`  failed: ${failure.label}`)
 }
-

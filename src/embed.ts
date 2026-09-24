@@ -24,17 +24,17 @@
  * @module dsh-decision-engine/embed
  */
 
-import { DecisionEngine } from './core/decision-engine.ts'
+import { aggregateDecisionHealth, assembleDecisionCore } from './assembly.ts'
+import type { DecisionEngine } from './core/decision-engine.ts'
 import { DecisionError } from './core/errors.ts'
-import { DecisionProviderRegistry } from './core/provider-registry.ts'
+import type { DecisionProviderRegistry } from './core/provider-registry.ts'
 import type { DecisionProvider, DecisionRequest, DecisionResult } from './core/types.ts'
 import type { DecisionTelemetry, DecisionTelemetrySink } from './core/telemetry.ts'
 import { createRingBufferSink } from './core/telemetry.ts'
 import { EnvironmentRegistry } from './environments/registry.ts'
 import type { EnvironmentAdapter, Objective } from './environments/types.ts'
-import { DecisionRuntime, type ExecutionMode, type RunOptions, type RuntimeConfig, type RuntimeConfigInput, type RuntimeOutcome, type TaskOptions, type TaskOutcome } from './runtime/runner.ts'
+import type { DecisionRuntime, ExecutionMode, RunOptions, RuntimeConfig, RuntimeConfigInput, RuntimeOutcome, TaskOptions, TaskOutcome } from './runtime/runner.ts'
 import { CustomEnvironmentAdapter, type CustomEnvironmentSpec } from './environments/custom/adapter.ts'
-import { LayaDecisionProvider } from './providers/laya/provider.ts'
 import type { LayaConfig } from './providers/laya/config.ts'
 import type { DecisionEngineHealth } from './service.ts'
 
@@ -122,34 +122,21 @@ export function createDecisionLayer(options: EmbedOptions = {}): EmbeddedDecisio
         }
       }
 
-  const providers = new DecisionProviderRegistry()
   const layaOption = options.laya ?? true
-  if (layaOption !== false) {
-    const layaConfig: LayaConfig = typeof layaOption === 'object' ? layaOption : {}
-    providers.register(new LayaDecisionProvider({ config: layaConfig }), { enabled: true, config: { ...layaConfig } })
-  }
-  for (const provider of options.providers ?? []) providers.register(provider, { enabled: true })
-
-  if (options.defaultProvider !== undefined) {
-    // `setDefault` validates, so an unknown id fails here rather than at the
-    // first decision.
-    providers.setDefault(options.defaultProvider)
-  } else if (providers.getDefaultId() === undefined && providers.ids().length === 0) {
+  if (layaOption === false && (options.providers?.length ?? 0) === 0) {
     throw new DecisionError('provider_unavailable', 'createDecisionLayer was called with no providers.', {
       details: { hint: 'Pass providers: [...] or leave laya enabled.' },
     })
   }
-
-  const engine = new DecisionEngine({
-    ...options.defaultProvider === undefined ? {} : { defaultProviderId: options.defaultProvider },
+  const environments = new EnvironmentRegistry()
+  const { providers, engine, runtime } = assembleDecisionCore({
+    laya: layaOption === false ? false : typeof layaOption === 'object' ? layaOption : {},
+    extraProviders: (options.providers ?? []).map(provider => ({ provider })),
+    ...options.defaultProvider === undefined ? {} : { defaultProvider: options.defaultProvider },
+    ...options.runtime === undefined ? {} : { runtime: options.runtime },
     ...options.confidenceThreshold === undefined ? {} : { confidenceThreshold: options.confidenceThreshold },
     ...options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
     telemetry,
-  }, providers)
-
-  const environments = new EnvironmentRegistry()
-  const runtime = new DecisionRuntime(engine, {
-    ...options.runtime === undefined ? {} : { config: options.runtime },
     environments,
   })
 
@@ -171,23 +158,8 @@ export function createDecisionLayer(options: EmbedOptions = {}): EmbeddedDecisio
       ...signal === undefined ? {} : { signal },
     }),
     telemetry: () => records,
-    health: async (): Promise<DecisionEngineHealth> => {
-      const providerHealth = await providers.health()
-      const statuses = Object.values(providerHealth).map(entry => entry.status)
-      const status = statuses.length === 0 || statuses.every(entry => entry === 'unavailable')
-        ? 'unavailable'
-        : statuses.every(entry => entry === 'ok')
-          ? 'ok'
-          : 'degraded'
-      const defaultProvider = providers.getDefaultId()
-      return {
-        status,
-        ...defaultProvider === undefined ? {} : { defaultProvider },
-        providers: providerHealth,
-        environments: environments.ids(),
-        telemetryRecords: records.length,
-      }
-    },
+    health: () => aggregateDecisionHealth({ providers, environments, records,
+      ...options.defaultProvider === undefined ? {} : { requestedDefault: options.defaultProvider } }),
     dispose: async () => {
       await environments.disposeAll()
       await providers.disposeAll()

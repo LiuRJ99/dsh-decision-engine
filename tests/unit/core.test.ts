@@ -152,6 +152,30 @@ describe('engine routing', () => {
     })
   })
 
+  it('applies capability fallback changes after construction', async () => {
+    const registry = new DecisionProviderRegistry()
+    registry.register(new ScriptedProvider({ id: 'chooser', capabilities: ['choice'], plan: () => ({ provider: 'chooser', mode: 'choice', selected: 'submit', latencyMs: 0 }) }))
+    registry.register(rankingProvider(['submit', 'edit'], { id: 'ranker' }))
+    const engine = new DecisionEngine({ defaultProviderId: 'chooser' }, registry)
+    assert.equal((await engine.decide({ ...REQUEST, mode: 'ranking' })).provider, 'ranker')
+    engine.reconfigure({ allowCapabilityFallback: false })
+    await assert.rejects(engine.decide({ ...REQUEST, mode: 'ranking' }), (error: unknown) =>
+      error instanceof DecisionError && error.code === 'provider_unsupported_capability')
+  })
+
+  it('uses the registry default after reconfiguration or unregistering', async () => {
+    const registry = new DecisionProviderRegistry()
+    registry.register(constantProvider('submit', { id: 'first' }))
+    const removeSecond = registry.register(constantProvider('wait', { id: 'second' }))
+    const engine = new DecisionEngine({}, registry)
+    engine.reconfigure({ defaultProviderId: 'second' })
+    assert.equal(engine.router.defaultProviderId, registry.getDefaultId())
+    assert.equal((await engine.decide(REQUEST)).provider, 'second')
+    removeSecond()
+    assert.equal(engine.router.defaultProviderId, 'first')
+    assert.equal((await engine.decide(REQUEST)).provider, 'first')
+  })
+
   it('fails with provider_unavailable when nothing is enabled', async () => {
     const engine = new DecisionEngine({}, new DecisionProviderRegistry())
     await assert.rejects(engine.decide(REQUEST), (error: unknown) => {
