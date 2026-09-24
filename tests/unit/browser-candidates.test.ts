@@ -3,13 +3,44 @@ import { it } from 'node:test'
 import { BrowserEnvironmentAdapter } from '../../src/environments/browser/adapter.ts'
 import { parseBrowserSnapshot } from '../../src/environments/browser/snapshot.ts'
 import { createMapDispatcher } from '../../src/environments/dispatch.ts'
-import { createDecisionEngineComposition } from '../../src/composition.ts'
+import { Config, createDecisionEngineComposition } from '../../src/composition.ts'
 import { executeDecide } from '../../src/tools/decide-logic.ts'
 import { executeRunTask } from '../../src/tools/decision-run.ts'
 import { ScriptedProvider } from '../helpers.ts'
 
 const text = 'Title: Quiz\nStatus: complete\nMain content:\nChoose A\nInteractive elements:\n  [7] clickable "A" [classes=option%20selected]\n  [8] clickable "Disabled" [disabled]\n  [1] button "Next"'
 const objective = { description: 'Choose A' }
+
+it('derives page controls when settings resolve an omitted candidate list to empty', async () => {
+  const snapshot = 'Title: Quiz\nStatus: complete\nMain content:\nChoose a bank\nInteractive elements:\n  [6] button "📚 加载示例题库"\n  [7] button "▶ 开始"'
+  const config = Config({ providers: { laya: { enabled: false } } })
+  assert.deepEqual(config.browser?.candidates, [])
+  const created = createDecisionEngineComposition({
+    config,
+    dispatcher: createMapDispatcher({ browser_snapshot: () => ({ ok: true, text: snapshot }) }),
+  })
+  const browser = created.environments.require('browser')
+  const request = await browser.buildDecisionRequest(await browser.observe(), { description: 'Load sample bank' })
+  assert.deepEqual(request.candidates.map(candidate => candidate.description), [
+    'Activate "📚 加载示例题库"', 'Activate "▶ 开始"',
+  ])
+  await created.dispose()
+})
+
+it('keeps a non-empty configured browser candidate set in patch mode', async () => {
+  const config = Config({
+    providers: { laya: { enabled: false } },
+    browser: { candidates: [{ id: 'load', description: 'Load the bank', action: { kind: 'click', target: 6 } }] },
+  })
+  const created = createDecisionEngineComposition({
+    config,
+    dispatcher: createMapDispatcher({ browser_snapshot: () => ({ ok: true, text: 'Title: Quiz\nStatus: complete\nInteractive elements:\n  [6] button "📚 加载示例题库"' }) }),
+  })
+  const browser = created.environments.require('browser')
+  const request = await browser.buildDecisionRequest(await browser.observe(), { description: 'Load sample bank' })
+  assert.deepEqual(request.candidates.map(candidate => candidate.description), ['Load the bank'])
+  await created.dispose()
+})
 
 it('distinguishes false states and retains untrusted raw class evidence', () => {
   const snapshot = parseBrowserSnapshot('Interactive elements:\n  [1] checkbox "A" [unchecked/unselected/unpressed/classes=option%20selected/outside viewport]')

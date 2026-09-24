@@ -103,7 +103,7 @@ export interface BrowserEnvironmentConfig {
   /** Hard cap on characters of page text placed into the decision state. */
   maxStateChars?: number
   /**
-   * Explicit candidate set. When present the adapter runs in `patch` strategy
+   * Non-empty candidate set. When supplied the adapter runs in `patch` strategy
    * and offers exactly these candidates instead of deriving them from the page.
    * Validated by the browser adapter at registration time.
    */
@@ -198,7 +198,7 @@ export const Config: z<Config> = z.object({
     maxCandidates: z.number().description('Maximum number of page controls offered to the decider. Defaults to 12.'),
     maxStateChars: z.number().description('How much page text is placed into the decision state. Defaults to 6000.'),
     candidates: z.array(z.any()).description(
-      'Fixed candidate set. When set, the adapter offers exactly these instead of deriving them from the page.',
+      'Non-empty fixed candidate set. An empty list uses controls derived from the page.',
     ),
   }).description('Observes pages through the registered browser_* tools. Plain text only: never reads a screenshot.'),
   computer: z.object({
@@ -249,14 +249,16 @@ export function createDecisionEngineComposition(options: {
   const environments = new EnvironmentRegistry()
   if (config.browser?.enabled ?? true) {
     const browserCandidates = config.browser?.candidates as BrowserActionCandidate[] | undefined
+    // Schemastery resolves an omitted array to []; that is not a patch.
+    const hasBrowserPatch = browserCandidates !== undefined && browserCandidates.length > 0
     environments.register(new BrowserEnvironmentAdapter({
       ...config.browser?.environmentId === undefined ? {} : { id: config.browser.environmentId },
       dispatcher: options.dispatcher,
       config: {
-        strategy: browserCandidates === undefined ? 'form' : 'patch',
+        strategy: hasBrowserPatch ? 'patch' : 'form',
         ...config.browser?.includeNonSemantic === undefined ? {} : { includeNonSemantic: config.browser.includeNonSemantic },
         ...config.browser?.candidateSelector === undefined ? {} : { candidateSelector: config.browser.candidateSelector },
-        ...browserCandidates === undefined ? {} : { candidates: browserCandidates },
+        ...hasBrowserPatch ? { candidates: browserCandidates } : {},
         ...config.browser?.maxCandidates === undefined ? {} : { maxCandidates: config.browser.maxCandidates },
         ...config.browser?.maxStateChars === undefined ? {} : { maxStateChars: config.browser.maxStateChars },
       },

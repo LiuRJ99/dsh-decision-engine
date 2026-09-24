@@ -96,7 +96,7 @@ export interface BrowserEnvironmentConfig {
     /** Hard cap on characters of page text placed into the decision state. */
     maxStateChars?: number;
     /**
-     * Explicit candidate set. When present the adapter runs in `patch` strategy
+     * Non-empty candidate set. When supplied the adapter runs in `patch` strategy
      * and offers exactly these candidates instead of deriving them from the page.
      * Validated by the browser adapter at registration time.
      */
