@@ -1,4 +1,4 @@
-/** Decision Engine card inside Settings → Plugins → Configurable. */
+/** Decision Engine card inside Settings → Plugins → Plugin configuration. */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 
 const NAMESPACE = 'decision-engine'
@@ -139,15 +139,15 @@ export function DecisionSettingsCard({ scope }: { scope: SettingsScope }) {
     {open && <form className="dsh-de-body" onSubmit={event => { void save(event) }}>
       {snapshot.status === 'loading' && <p className="dsh-de-hint">正在读取设置…</p>}
       {snapshot.status === 'ready' && <>
-        <label className="dsh-de-field" htmlFor="dsh-de-provider">
-          <span className="dsh-de-label">默认决策模型</span>
+        <div className="dsh-de-field">
+          <label className="dsh-de-label" htmlFor="dsh-de-provider">默认决策模型</label>
           <select id="dsh-de-provider" className="dsh-de-select" value={value} disabled={!snapshot.writable || saving || options.length === 0}
             onChange={event => stage({ kind: 'set', value: event.target.value })}>
             {value === '' && <option value="">自动选择</option>}
             {options.map(id => <option key={id} value={id}>{id === 'laya' ? 'Laya · laya' : id}{!available.includes(id) ? '（不在可用列表）' : ''}</option>)}
           </select>
           <span className="dsh-de-hint">选择已注册的 Provider；单次任务仍可用 provider 参数指定其他模型。</span>
-        </label>
+        </div>
         {catalog.status === 'loading' && <p className="dsh-de-hint">正在读取可用模型…</p>}
         {catalog.status === 'error' && <p className="dsh-de-hint">模型列表暂不可用，当前显示已配置项。</p>}
         {!snapshot.writable && <p className="dsh-de-hint">当前部署的设置为只读。</p>}
