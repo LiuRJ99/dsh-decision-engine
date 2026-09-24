@@ -4,9 +4,9 @@
  *
  * This is deliberately separate from the rest of the suite, which imports
  * `lib/*.js` by path. A path import cannot catch the class of bug this checks
- * for: the Cordis loader imports `dsh-decision-engine/plugin` by specifier, and
- * an `exports` map that omits or mistargets that subpath fails there while every
- * in-repo test still passes. (That is exactly how a broken v0.1.0 was found.)
+ * for: consumers import public entries through the package exports map. The
+ * bundle patch uses a relative file entry so the Web client can discover its
+ * package metadata, while the public `./plugin` subpath remains importable.
  *
  * The import specifier is `file:<package dir>` so Node resolves the real
  * `exports` map without needing the package installed anywhere.
@@ -121,16 +121,19 @@ for (const [key, target] of Object.entries(pkg.exports)) {
   }
 }
 
-// The bundle patch is what a profile reads; it must name a subpath that exists.
+// DSH anchors relative bundle entries beside the patch file. Its Web client
+// discovers package metadata only for a package root or a path-like entry.
 const patch = readFileSync(join(packageDir, pkg.dsh.bundle.patch.replace(/^\.\//, '')), 'utf8')
 const rowName = /name:\s*(\S+)/.exec(patch)?.[1]
 check('the bundle patch declares a row name', rowName !== undefined, rowName)
 if (rowName !== undefined) {
   try {
-    const module = await resolveFrom(rowName)
-    check('the bundle patch row name resolves to a loadable plugin entry', typeof module.apply === 'function', rowName)
+    const pathLike = rowName.startsWith('./') || rowName.startsWith('../')
+    const entry = pathLike ? pathToFileURL(join(packageDir, rowName)).href : rowName
+    const module = pathLike ? await import(entry) : await resolveFrom(entry)
+    check('the bundle patch row is Web discoverable and loads a plugin entry', pathLike && typeof module.apply === 'function', rowName)
   } catch (error) {
-    check('the bundle patch row name resolves to a loadable plugin entry', false, error instanceof Error ? error.message : String(error))
+    check('the bundle patch row is Web discoverable and loads a plugin entry', false, error instanceof Error ? error.message : String(error))
   }
 }
 

@@ -10,8 +10,8 @@
 # capability gate stays the single authority on whether a capability is
 # reachable.
 #
-# The `name` resolves through the profile's node_modules via this package's
-# exports map, so `dsh plugin --profile <name> add <this package>` is enough.
+# The relative `name` is anchored beside this package's patch file by DSH.
+# A file entry also lets the Web client discover this package's `dsh.client`.
 #
 # Provider-private settings belong under `providers.<id>` — never as top-level
 # keys — so a second model family can be added without touching this row's
@@ -21,10 +21,9 @@
 
 - insert:
     - id: decision-engine
-      # The Cordis entry is the package's `./plugin` subpath: the root export is
-      # the host-free composition surface (importable without a DSH process),
-      # and `apply` lives here.
-      name: dsh-decision-engine/plugin
+      # The root export is the host-free composition surface (importable
+      # without a DSH process); the Cordis `apply` entry lives here.
+      name: ./lib/plugin.js
       config:
         enabled: true
         defaultProvider: laya

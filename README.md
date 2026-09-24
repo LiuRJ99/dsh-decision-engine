@@ -65,7 +65,7 @@ Browser / Computer / Custom / HTTP 环境适配器**一行都不用改**。
 
 ```bash
 # 从固定 tag 安装（本仓库推荐的方式）
-dsh plugin --profile web-candidate add github:LiuRJ99/dsh-decision-engine#v0.1.0
+dsh plugin --profile web-candidate add github:LiuRJ99/dsh-decision-engine#v0.4.9
 
 # 或用本地 checkout / release tarball
 dsh plugin --profile web-candidate add /path/to/dsh-decision-engine
