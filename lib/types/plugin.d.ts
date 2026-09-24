@@ -43,7 +43,7 @@ export declare class HostToolDispatcher implements ToolDispatcher {
  * Settings namespace the plugin owns.
  *
  * The host settings namespace supplies the resolved data and write endpoint;
- * the Web client entry registers a first-level section in the settings panel.
+ * the Web client entry registers a card inside the Plugins settings section.
  */
 export declare const SETTINGS_NAMESPACE: "decision-engine";
 export declare function apply(ctx: Context, config?: Config): void;

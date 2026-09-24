@@ -65,7 +65,7 @@ Browser / Computer / Custom / HTTP 环境适配器**一行都不用改**。
 
 ```bash
 # 从固定 tag 安装（本仓库推荐的方式）
-dsh plugin --profile web-candidate add github:LiuRJ99/dsh-decision-engine#v0.4.11
+dsh plugin --profile web-candidate add github:LiuRJ99/dsh-decision-engine#v0.4.12
 
 # 或用本地 checkout / release tarball
 dsh plugin --profile web-candidate add /path/to/dsh-decision-engine
@@ -197,7 +197,7 @@ Laya provider 报告 `provider_raw`，这是**测量结论**而不是保守选�
 ## 配置
 
 配置有三个来源，优先级从低到高：schema 默认值 → `cordis.patch.yml` 的 bundle 行 →
-设置面板写入的用户层。**常用配置可在 DSH Web「设置 → 决策引擎」中调整**（见下节），
+设置面板写入的用户层。**默认模型可在 DSH Web「设置 → 插件 → 可配置插件」中调整**（见下节），
 不必手改 YAML。
 
 ```yaml
@@ -290,16 +290,16 @@ v0.3.0 起可在 `decision_run` / `decision_decide` 的 `browser` 参数中临�
 
 ### 通过内置设置面板配置
 
-Host 注册 `decision-engine` settings 命名空间，Web 客户端在设置侧栏提供独立的
-「决策引擎」页面，只调整默认 Provider ID。候选 ID 来自已配置的 Provider；
-也能输入运行时已注册的 ID。当前内置的只有 `laya`；其他决策模型须先以独立的
+Host 注册 `decision-engine` settings 命名空间，Web 客户端在「设置 → 插件 →
+可配置插件」提供「决策引擎」卡片，用下拉框选择默认 Provider。选项来自运行中
+已启用的 Provider 注册表；当前内置的只有 `laya`，其他决策模型须先以独立的
 Provider ID 注册。单次 `decision_decide` / `decision_run` 可用 `provider` 参数临时覆盖默认值。
 模型目录、驻留策略与循环预算不占据前台；高级部署仍可通过配置文件设置，
 任务预算可在调用参数里覆盖。浏览器和电脑按任务调用，并沿用宿主能力门控。
 
 面板行为：
 
-- **立即生效**：页面上的 `defaultProvider`。后续决策与执行读取新值。
+- **立即生效**：卡片保存的 `defaultProvider`。后续决策与执行读取新值。
 - **重启后生效**：配置文件中的 `providers.*`。Laya 运行时在启动时创建。
 - 面板读到的是**已保存的解析值**：schema 默认、bundle 行、用户覆盖三层合并后的结果；
   只有你真正改过的字段才会被记为「用户覆盖」。

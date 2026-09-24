@@ -28,9 +28,9 @@ interface ClientContext {
     };
     effect(install: () => () => void, label: string): void;
 }
-export declare function DecisionSettingsSection({ scope }: {
+export declare function DecisionSettingsCard({ scope }: {
     scope: SettingsScope;
-}): import("react/jsx-runtime").JSX.Element;
+}): import("react/jsx-runtime").JSX.Element | null;
 export declare const inject: string[];
 export declare function apply(ctx: ClientContext): void;
 export {};

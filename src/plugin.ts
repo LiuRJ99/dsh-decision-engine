@@ -24,6 +24,8 @@ import type { ToolExecutionScope } from './tools/execution-scope.ts'
 import { queryCapabilityUnlocked, TOOL_LAZY_GATE_SERVICE } from './gate.ts'
 import { DECISION_CONTROL_SKILL } from './skill.ts'
 import { DEFAULT_RUNTIME_CONFIG, validateRuntimeConfig } from './runtime/runner.ts'
+import { PROVIDER_CATALOG_ROUTE, serveProviderCatalog } from './provider-catalog-route.ts'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'decision-engine'
@@ -112,7 +114,7 @@ function requestAgent(ctx: Context): Agent | undefined {
  * Settings namespace the plugin owns.
  *
  * The host settings namespace supplies the resolved data and write endpoint;
- * the Web client entry registers a first-level section in the settings panel.
+ * the Web client entry registers a card inside the Plugins settings section.
  */
 export const SETTINGS_NAMESPACE = 'decision-engine' as const
 
@@ -164,6 +166,18 @@ export function apply(ctx: Context, config: Config = {}): void {
     },
   })
   activeComposition = composition
+
+  // Web settings reads the live registry so its model selector includes
+  // providers registered by other plugins after this composition was built.
+  const webServer = ctx.get('webServer' as never) as unknown as {
+    register(route: { kind: 'exact'; path: string; handler(req: IncomingMessage, res: ServerResponse): void }): () => void
+  } | undefined
+  if (webServer !== undefined) {
+    ctx.effect(() => webServer.register({
+      kind: 'exact', path: PROVIDER_CATALOG_ROUTE,
+      handler: (req, res) => serveProviderCatalog(req, res, () => composition.providers.enabledIds()),
+    }), 'decision-engine provider catalog route')
+  }
 
   // Publish the service on this context. `ctx.provide` owns the disposer, so
   // unloading the plugin (or the preset scope that mounted it) removes the

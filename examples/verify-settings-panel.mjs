@@ -76,6 +76,8 @@ const scratch = mkdtempSync(join(tmpdir(), 'dsh-des-settings-'))
 const settingsPath = join(scratch, 'settings.yaml')
 
 const ctx = new Context()
+const routes = new Map()
+ctx.provide('webServer', { register(route) { routes.set(route.path, route); return () => routes.delete(route.path) } })
 new SystemPrompt(ctx, {})
 new ToolRuntime(ctx)
 await ctx.plugin(FileSettingsProvider, { path: settingsPath, dshHome: scratch, watch: false, debounceMs: 0 })
@@ -131,6 +133,16 @@ check('Laya loads on use and releases after ten idle minutes by default',
     && initialHealth.providers.laya?.details?.idleTtlMs === 600_000)
 check('nothing is marked as a user override yet', ours.user === undefined || Object.keys(ours.user ?? {}).length === 0)
 
+function catalogIds() {
+  const route = routes.get('/plugins/dsh-decision-engine/providers')
+  if (route === undefined) return []
+  let body = ''
+  const res = { setHeader() {}, end(value) { body = value }, statusCode: 200 }
+  route.handler({ method: 'GET', headers: { host: 'localhost' } }, res)
+  return JSON.parse(body).providers
+}
+check('the Web model selector reads the live provider catalog', JSON.stringify(catalogIds()) === '["laya"]')
+
 // --- 4. a write reaches the live engine -----------------------------------
 const before = ctx.decisionEngine.confidenceThreshold
 await ctx.settings.update(SETTINGS_NAMESPACE, { runtime: { confidenceThreshold: 0.2, maxSteps: 4 } })
@@ -151,6 +163,7 @@ const removeAlternative = ctx.decisionEngine.providers.register({
   capabilities: ['choice'],
   decide: async () => ({ provider: 'alternative', mode: 'choice', selected: 'a', latencyMs: 0 }),
 })
+check('the model catalog includes a newly registered provider', JSON.stringify(catalogIds()) === '["laya","alternative"]')
 await ctx.settings.update(SETTINGS_NAMESPACE, { defaultProvider: 'alternative' })
 const switched = await ctx.decisionEngine.decide({ state: 'ready', candidates: [{ id: 'a', description: 'A' }, { id: 'b', description: 'B' }] })
 check('a saved default switches live routing to another registered model',

@@ -182,7 +182,8 @@ in `providers/laya/modes.ts` and the global floor starts applying to it.
 
 ## Configuration
 
-The first-level **Settings → Decision Engine** page selects the default Provider ID.
+The **Settings → Plugins → Configurable** Decision Engine card selects the default
+Provider from a dropdown of currently enabled, registered providers.
 Only Laya ships built in; other decision models need their own registered IDs.
 Each decision call can override the default with its `provider` argument.
 Model paths, residency and execution budgets stay in deployment or task options.

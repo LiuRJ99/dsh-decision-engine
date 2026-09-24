@@ -1,7 +1,8 @@
-/** First-level Decision Engine settings section for the host-side namespace. */
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
+/** Decision Engine card inside Settings → Plugins → Configurable. */
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 
 const NAMESPACE = 'decision-engine'
+const PROVIDER_CATALOG_ROUTE = '/plugins/dsh-decision-engine/providers'
 
 interface SettingsSnapshot {
   status: 'loading' | 'ready' | 'unavailable'
@@ -30,14 +31,15 @@ interface ClientContext {
   }
   effect(install: () => () => void, label: string): void
 }
+type Catalog = { status: 'idle' | 'loading' | 'ready' | 'error'; ids: string[] }
 
 function field(object: unknown, key: string): unknown {
   return typeof object === 'object' && object !== null && Object.hasOwn(object, key)
     ? (object as Record<string, unknown>)[key] : undefined
 }
 
-/** Suggestions come from configured providers; free text also accepts a provider added at runtime. */
-function providerSuggestions(snapshot: SettingsSnapshot): string[] {
+/** Configured IDs keep the control usable while the live catalog is loading. */
+function configuredIds(snapshot: SettingsSnapshot): string[] {
   const providers = field(snapshot.value, 'providers')
   if (typeof providers !== 'object' || providers === null) return []
   return Object.entries(providers).flatMap(([id, config]) =>
@@ -45,43 +47,70 @@ function providerSuggestions(snapshot: SettingsSnapshot): string[] {
 }
 
 const STYLE = `
-.dsh-de-page{display:grid;gap:18px;max-width:640px;color:inherit}
-.dsh-de-title{font-size:18px;font-weight:600;margin:0}.dsh-de-intro,.dsh-de-hint{font-size:12px;color:var(--dsw-alias-label-tertiary,#747b86);line-height:1.5}
-.dsh-de-intro{margin:5px 0 0}.dsh-de-card{border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:10px;background:var(--dsw-alias-bg-layer-3,#fff);padding:16px}
-.dsh-de-label{display:block;font-size:13px;font-weight:600;margin-bottom:8px}.dsh-de-control{display:flex;gap:8px;align-items:center}
-.dsh-de-control input{box-sizing:border-box;min-width:0;flex:1;padding:9px 10px;border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:7px;background:var(--dsw-alias-bg-layer-3,#fff);color:inherit;font:inherit;font-size:13px}
-.dsh-de-hint{display:block;margin:8px 0 0}.dsh-de-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
-.dsh-de-actions button,.dsh-de-reset{border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:7px;padding:6px 10px;background:var(--dsw-alias-bg-layer-2,#f7f8fa);color:inherit;font:inherit;font-size:12px;cursor:pointer}
-.dsh-de-actions button:disabled,.dsh-de-reset:disabled{opacity:.45;cursor:default}.dsh-de-error{color:var(--dsw-alias-label-error,#c33);font-size:12px;margin:10px 0 0}
+.dsh-de-card{list-style:none;border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:12px;background:var(--dsw-alias-bg-layer-3,#fff);overflow:hidden;color:inherit}
+.dsh-de-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.dsh-de-head:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#4c78ff);outline-offset:-2px}.dsh-de-head-text{display:grid;gap:3px}
+.dsh-de-title{font-size:15px;font-weight:600}.dsh-de-subtitle,.dsh-de-hint,.dsh-de-status{font-size:12px;line-height:1.5;color:var(--dsw-alias-label-tertiary,#747b86)}
+.dsh-de-chevron{font-size:14px;color:var(--dsw-alias-label-tertiary,#747b86)}.dsh-de-body{padding:16px;border-top:1px solid var(--dsw-alias-border-l2,#e5e7eb)}
+.dsh-de-field{display:grid;gap:7px}.dsh-de-label{font-size:13px;font-weight:500}.dsh-de-select{box-sizing:border-box;width:100%;padding:8px 12px;border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:8px;background:var(--dsw-alias-bg-layer-3,#fff);color:inherit;font:inherit;font-size:13px;cursor:pointer}
+.dsh-de-select:focus{outline:none;border-color:var(--dsw-alias-brand-primary,#4c78ff)}.dsh-de-select:disabled{opacity:.55;cursor:default}
+.dsh-de-hint,.dsh-de-status{margin:0}.dsh-de-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2,#e5e7eb)}
+.dsh-de-actions button{border-radius:8px;padding:7px 12px;font:inherit;font-size:13px;cursor:pointer}.dsh-de-actions button:disabled{opacity:.45;cursor:default}
+.dsh-de-secondary{border:1px solid var(--dsw-alias-border-l2,#d9dde3);background:var(--dsw-alias-bg-layer-3,#fff);color:inherit}
+.dsh-de-save{border:0;background:var(--dsw-alias-label-primary,#111827);color:var(--dsw-alias-bg-layer-3,#fff);font-weight:500}
+.dsh-de-error{color:var(--dsw-alias-label-error,#c33)}
 `
 
-export function DecisionSettingsSection({ scope }: { scope: SettingsScope }) {
+export function DecisionSettingsCard({ scope }: { scope: SettingsScope }) {
   const subscribe = useCallback((listener: () => void) => scope.subscribe(listener), [scope])
   const getSnapshot = useCallback(() => scope.getSnapshot(), [scope])
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-  const [draft, setDraft] = useState<Draft | undefined>(undefined)
+  const [open, setOpen] = useState(false)
+  const [catalog, setCatalog] = useState<Catalog>({ status: 'idle', ids: [] })
+  const [refresh, setRefresh] = useState(0)
+  const [draft, setDraft] = useState<Draft | undefined>()
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
   const editRevision = useRef<number | undefined>(undefined)
+
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    setCatalog(previous => ({ ...previous, status: 'loading' }))
+    void fetch(PROVIDER_CATALOG_ROUTE, { headers: { accept: 'application/json' } })
+      .then(async response => {
+        if (!response.ok) throw new Error('provider catalog unavailable')
+        const ids = field(await response.json() as unknown, 'providers')
+        if (!Array.isArray(ids) || !ids.every(id => typeof id === 'string')) throw new Error('invalid provider catalog')
+        return ids as string[]
+      })
+      .then(ids => { if (active) setCatalog({ status: 'ready', ids }) })
+      .catch(() => { if (active) setCatalog(previous => ({ ...previous, status: 'error' })) })
+    return () => { active = false }
+  }, [open, refresh])
+
   const saved = field(snapshot.value, 'defaultProvider')
   const base = field(snapshot.base, 'defaultProvider')
   const shown = draft?.kind === 'set' ? draft.value : draft?.kind === 'unset' ? base : saved
   const value = typeof shown === 'string' ? shown : ''
   const overridden = field(snapshot.user, 'defaultProvider') !== undefined
+  const available = catalog.status === 'ready' ? catalog.ids : configuredIds(snapshot)
+  const options = [...new Set([...available, ...(value ? [value] : [])])]
 
-  const stage = (next: Draft) => {
+  const stage = (next: Draft): void => {
     if (draft === undefined) editRevision.current = snapshot.revision
     setDraft(next)
-    setError('')
+    setMessage('')
   }
-  const save = async () => {
+  const save = async (event: FormEvent): Promise<void> => {
+    event.preventDefault()
     if (draft === undefined || saving || snapshot.status !== 'ready' || !snapshot.writable) return
-    const selected = draft.kind === 'set' ? draft.value.trim() : ''
+    const selected = draft.kind === 'set' ? draft.value : ''
     const write: SettingsOp = selected === ''
       ? { op: 'unset', path: ['defaultProvider'] }
       : { op: 'set', path: ['defaultProvider'], value: selected }
     setSaving(true)
-    setError('')
+    setMessage('')
     try {
       await scope.mutate([write], editRevision.current)
       const userValue = field(scope.getSnapshot().user, 'defaultProvider')
@@ -90,36 +119,48 @@ export function DecisionSettingsSection({ scope }: { scope: SettingsScope }) {
       }
       setDraft(undefined)
       editRevision.current = undefined
+      setMessage('已保存，后续决策立即生效。')
     } catch {
-      setError('保存未生效。请检查 Provider ID，或刷新后重试。')
+      setMessage('保存未生效。请刷新模型列表，或检查其他页面的修改。')
     } finally {
       setSaving(false)
     }
   }
 
-  return <div className="dsh-de-page">
-    <header>
-      <h2 className="dsh-de-title">决策引擎</h2>
-      <p className="dsh-de-intro">选择默认决策模型。单次任务也可以指定其他 Provider。</p>
-    </header>
-    {snapshot.status === 'unavailable' && <p className="dsh-de-hint">当前部署无法读取决策引擎设置。</p>}
-    {snapshot.status === 'loading' && <p className="dsh-de-hint">正在读取设置…</p>}
-    {snapshot.status === 'ready' && <div className="dsh-de-card">
-      <label className="dsh-de-label" htmlFor="dsh-de-provider">默认决策模型（Provider ID）</label>
-      <div className="dsh-de-control">
-        <input id="dsh-de-provider" type="text" list="dsh-de-providers" value={value} disabled={!snapshot.writable || saving} onChange={event => stage({ kind: 'set', value: event.target.value })} />
-        <datalist id="dsh-de-providers">{providerSuggestions(snapshot).map(id => <option value={id} key={id} />)}</datalist>
-        {(overridden || draft !== undefined) && <button type="button" className="dsh-de-reset" disabled={!snapshot.writable || saving} onClick={() => stage({ kind: 'unset' })}>恢复默认</button>}
-      </div>
-      <p className="dsh-de-hint">候选 ID 来自已配置的 Provider；也可输入运行时已注册的 ID。切换默认值立即生效，单次调用的 provider 参数可以覆盖它。</p>
-      {!snapshot.writable && <p className="dsh-de-hint">当前部署的设置为只读。</p>}
-      {error && <p className="dsh-de-error" role="status">{error}</p>}
-      {draft !== undefined && <div className="dsh-de-actions">
-        <button type="button" disabled={saving} onClick={() => { setDraft(undefined); editRevision.current = undefined; setError('') }}>放弃修改</button>
-        <button type="button" disabled={saving || !snapshot.writable} onClick={() => { void save() }}>{saving ? '保存中…' : '保存修改'}</button>
-      </div>}
-    </div>}
-  </div>
+  if (snapshot.status === 'unavailable') return null
+  return <li className="dsh-de-card">
+    <button type="button" className="dsh-de-head" aria-expanded={open} onClick={() => setOpen(previous => !previous)}>
+      <span className="dsh-de-head-text">
+        <span className="dsh-de-title">决策引擎</span>
+        <span className="dsh-de-subtitle">默认决策模型{typeof saved === 'string' ? ` · ${saved}` : ''}</span>
+      </span>
+      <span className="dsh-de-chevron" aria-hidden="true">{open ? '⌃' : '⌄'}</span>
+    </button>
+    {open && <form className="dsh-de-body" onSubmit={event => { void save(event) }}>
+      {snapshot.status === 'loading' && <p className="dsh-de-hint">正在读取设置…</p>}
+      {snapshot.status === 'ready' && <>
+        <label className="dsh-de-field" htmlFor="dsh-de-provider">
+          <span className="dsh-de-label">默认决策模型</span>
+          <select id="dsh-de-provider" className="dsh-de-select" value={value} disabled={!snapshot.writable || saving || options.length === 0}
+            onChange={event => stage({ kind: 'set', value: event.target.value })}>
+            {value === '' && <option value="">自动选择</option>}
+            {options.map(id => <option key={id} value={id}>{id === 'laya' ? 'Laya · laya' : id}{!available.includes(id) ? '（不在可用列表）' : ''}</option>)}
+          </select>
+          <span className="dsh-de-hint">选择已注册的 Provider；单次任务仍可用 provider 参数指定其他模型。</span>
+        </label>
+        {catalog.status === 'loading' && <p className="dsh-de-hint">正在读取可用模型…</p>}
+        {catalog.status === 'error' && <p className="dsh-de-hint">模型列表暂不可用，当前显示已配置项。</p>}
+        {!snapshot.writable && <p className="dsh-de-hint">当前部署的设置为只读。</p>}
+        {message && <p className={message.startsWith('保存未') ? 'dsh-de-status dsh-de-error' : 'dsh-de-status'} role="status">{message}</p>}
+        <div className="dsh-de-actions">
+          {catalog.status === 'error' && <button type="button" className="dsh-de-secondary" onClick={() => setRefresh(previous => previous + 1)}>刷新模型</button>}
+          {overridden && <button type="button" className="dsh-de-secondary" disabled={!snapshot.writable || saving} onClick={() => stage({ kind: 'unset' })}>恢复默认</button>}
+          {draft !== undefined && <button type="button" className="dsh-de-secondary" disabled={saving} onClick={() => { setDraft(undefined); editRevision.current = undefined; setMessage('') }}>放弃修改</button>}
+          <button type="submit" className="dsh-de-save" disabled={draft === undefined || saving || !snapshot.writable}>{saving ? '保存中…' : '保存'}</button>
+        </div>
+      </>}
+    </form>}
+  </li>
 }
 
 export const inject = ['slots', 'settingsScope']
@@ -133,11 +174,9 @@ export function apply(ctx: ClientContext): void {
     document.head.appendChild(style)
     return () => style.remove()
   }, 'decision-engine settings styles')
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: NAMESPACE,
-    order: 16,
-    label: '决策引擎',
+  ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
+    name: 'settings.plugin.item',
+    key: NAMESPACE,
     inject: () => ({ scope }),
-  }, DecisionSettingsSection))
+  }, DecisionSettingsCard))
 }
