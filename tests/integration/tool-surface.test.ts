@@ -263,6 +263,22 @@ describe('composition lifecycle', () => {
     assert.equal((await created.service.health()).requestedDefaultProvider, undefined)
   })
 
+  it('switches the default between registered models while allowing a per-call override', async () => {
+    const created = createDecisionEngineComposition({
+      config: { defaultProvider: 'first', providers: { laya: { enabled: false } } },
+      dispatcher: createMapDispatcher({}),
+      extraProviders: [
+        { provider: constantProvider('open', { id: 'first' }) },
+        { provider: constantProvider('wait', { id: 'second' }) },
+      ],
+    })
+    assert.equal((await created.service.decide(MINIMAL)).provider, 'first')
+    created.setDefaultProvider('second')
+    assert.equal((await created.service.decide(MINIMAL)).provider, 'second')
+    assert.equal((await created.service.decide({ ...MINIMAL, provider: 'first' })).provider, 'first')
+    assert.equal((await created.service.health()).defaultProvider, 'second')
+  })
+
   it('registers the Laya provider by default and can disable it', () => {
     const withLaya = createDecisionEngineComposition({ dispatcher: createMapDispatcher({}) })
     assert.deepEqual(withLaya.providers.ids(), ['laya'])

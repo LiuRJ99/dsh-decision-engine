@@ -29,8 +29,8 @@ export interface LayaConfig {
      */
     autoLoad?: boolean;
     /**
-     * Release the model after this many milliseconds without a decision. `0`
-     * (default) keeps it resident for the process lifetime.
+     * Release the model after this many milliseconds without a decision.
+     * Defaults to 10 minutes; `0` keeps it resident for the process lifetime.
      *
      * This is the memory/ latency dial: a resident session answers in ~100 ms but
      * holds its weights; an idle-released one hands the memory back and pays the
@@ -96,6 +96,8 @@ export interface ResolvedLayaConfig {
 }
 /** Default score levels: an ordered 5-point scale, lowest first. */
 export declare const DEFAULT_SCORE_LEVELS: readonly ["a very poor choice", "a poor choice", "an acceptable choice", "a good choice", "a very good choice"];
+/** Keep a loaded Laya session warm for ten idle minutes by default. */
+export declare const DEFAULT_LAYA_IDLE_TTL_MS: number;
 /**
  * Resolve raw config (with optional environment fallbacks) into a fully
  * specified {@link ResolvedLayaConfig}.

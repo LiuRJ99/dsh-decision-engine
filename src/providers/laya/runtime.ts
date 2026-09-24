@@ -109,8 +109,8 @@ export interface LayaRuntimeOptions {
    */
   autoLoad?: boolean
   /**
-   * Release the session after this many milliseconds without a call. `0`
-   * (default) keeps it resident for the process lifetime — the fast choice.
+   * Release the session after this many milliseconds without a call. The
+   * provider config defaults to 10 minutes; `0` keeps it resident indefinitely.
    * See {@link LayaRuntimeOptions.idleCheckIntervalMs} for how promptly it fires.
    */
   idleTtlMs?: number

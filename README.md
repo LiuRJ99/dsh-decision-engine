@@ -65,7 +65,7 @@ Browser / Computer / Custom / HTTP 环境适配器**一行都不用改**。
 
 ```bash
 # 从固定 tag 安装（本仓库推荐的方式）
-dsh plugin --profile web-candidate add github:LiuRJ99/dsh-decision-engine#v0.4.10
+dsh plugin --profile web-candidate add github:LiuRJ99/dsh-decision-engine#v0.4.11
 
 # 或用本地 checkout / release tarball
 dsh plugin --profile web-candidate add /path/to/dsh-decision-engine
@@ -211,8 +211,8 @@ decisionEngine:
       modelDir: /path/to/bundle     # 强烈建议显式给
       device: cpu                   # cpu / coreml / cuda / dml / wasm
       threads: 0
-      autoLoad: false               # 是否随 DSH 启动就加载模型
-      idleTtlMs: 0                  # >0 时空闲这么久就把模型释放掉
+      autoLoad: false               # 默认首次决策才加载
+      idleTtlMs: 600000             # 默认空闲 10 分钟后释放
       required: false               # true = 模型不可用即视为硬失败
       strictCandidates: true        # 模型选了不在候选集里的 id 就报错
       classificationBinaryMode: choice
@@ -291,44 +291,49 @@ v0.3.0 起可在 `decision_run` / `decision_decide` 的 `browser` 参数中临�
 ### 通过内置设置面板配置
 
 Host 注册 `decision-engine` settings 命名空间，Web 客户端在设置侧栏提供独立的
-「决策引擎」页面。模型与 Provider、模型驻留、执行预算分组折叠；默认只展开第一组。
-浏览器和电脑没有页面开关：任务使用对应环境时，适配器才调用宿主工具，并沿用
-宿主的能力门控。未展示的高级配置仍可通过配置文件管理。
+「决策引擎」页面，只调整默认 Provider ID。候选 ID 来自已配置的 Provider；
+也能输入运行时已注册的 ID。当前内置的只有 `laya`；其他决策模型须先以独立的
+Provider ID 注册。单次 `decision_decide` / `decision_run` 可用 `provider` 参数临时覆盖默认值。
+模型目录、驻留策略与循环预算不占据前台；高级部署仍可通过配置文件设置，
+任务预算可在调用参数里覆盖。浏览器和电脑按任务调用，并沿用宿主能力门控。
 
 面板行为：
 
-- **立即生效**：`defaultProvider` 和 `runtime.*`。后续决策与执行读取新值。
-- **重启后生效**：页面上的 `providers.*`。Laya 运行时在启动时创建，页面会标记这些字段。
+- **立即生效**：页面上的 `defaultProvider`。后续决策与执行读取新值。
+- **重启后生效**：配置文件中的 `providers.*`。Laya 运行时在启动时创建。
 - 面板读到的是**已保存的解析值**：schema 默认、bundle 行、用户覆盖三层合并后的结果；
   只有你真正改过的字段才会被记为「用户覆盖」。
-- 未知 Provider ID 或无效预算会被 Host 拒绝。仅关闭 Laya 时，重启后可保持引擎运行并报告无可用 Provider。
+- 未注册的 Provider ID 会被 Host 拒绝。仅关闭 Laya 时，重启后可保持引擎运行并报告无可用 Provider。
+
+循环预算有保护性默认值：单次循环最多 10 步、2 分钟；整任务 `decision_run`
+默认最多 1000 步、10 分钟。它们不是所有任务的最佳值，长任务应在调用时覆盖。
 
 配置文档落在 `$DSH_HOME/settings.yaml` 的 `decision-engine` 段（由 settings provider 管理）。
 
 ---
 
-## 模型驻留机制（随启动 / 配置后 / 随用随关？）
+## 模型驻留机制
 
-**默认是「随用随加载，加载后常驻」**。具体：
+**默认是「首次使用加载，空闲 10 分钟后释放」**。具体：
 
 | 时点 | 行为 |
 | --- | --- |
 | DSH 启动、插件 `apply()` | **不加载模型**。只注册 provider，会话不打开 |
 | 第一次 `decision_decide` | 加载（warm cache 约 5–6 秒），随后同一进程内复用 |
-| 之后的每次决策 | ~90–310 ms（按模式不同） |
+| 10 分钟内的后续决策 | 复用已加载的模型 |
+| 空闲 10 分钟后 | 释放权重；下次决策按需重新加载 |
 | 进程退出 | 随进程释放 |
-| `idleTtlMs > 0` 且空闲超时 | 主动 `close()` 释放权重，下次决策再加载 |
 
 为什么默认不随启动加载：一个 ONNX 会话会一直占住模型权重（Laya bundle 约 1.6 GB），
 从不做决策的部署不该付这个内存。
 
-想改变这个取舍，三个字段就够：
+需要特殊部署策略时，可在配置文件里覆盖：
 
 ```yaml
 providers:
   laya:
-    autoLoad: true      # 随 DSH 启动加载：把 5 秒成本从第一次决策挪到启动
-    idleTtlMs: 300000   # 空闲 5 分钟后释放：省内存，代价是下次决策重新加载
+    autoLoad: true      # 随 DSH 启动加载：把首次加载成本挪到启动
+    idleTtlMs: 0        # 保持常驻；默认 600000 毫秒
 ```
 
 `decisionEngine.health()` 会报告 `runtimeStatus`、`idleTtlMs`、`unloads`，可以据此观察。

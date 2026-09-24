@@ -33,8 +33,8 @@ export interface LayaConfig {
    */
   autoLoad?: boolean
   /**
-   * Release the model after this many milliseconds without a decision. `0`
-   * (default) keeps it resident for the process lifetime.
+   * Release the model after this many milliseconds without a decision.
+   * Defaults to 10 minutes; `0` keeps it resident for the process lifetime.
    *
    * This is the memory/ latency dial: a resident session answers in ~100 ms but
    * holds its weights; an idle-released one hands the memory back and pays the
@@ -109,6 +109,9 @@ export const DEFAULT_SCORE_LEVELS = [
   'a very good choice',
 ] as const
 
+/** Keep a loaded Laya session warm for ten idle minutes by default. */
+export const DEFAULT_LAYA_IDLE_TTL_MS = 10 * 60_000
+
 const DEFAULT_CHOICE_INSTRUCTIONS = [
   'You are choosing the single best next action for an agent.',
   'Objective: {{objective}}',
@@ -145,7 +148,7 @@ export function resolveLayaConfig(config: LayaConfig = {}, env: NodeJS.ProcessEn
     : device.split(',').map(part => part.trim()).filter(part => part !== '')
   return {
     autoLoad: config.autoLoad ?? false,
-    idleTtlMs: Math.max(0, config.idleTtlMs ?? 0),
+    idleTtlMs: Math.max(0, config.idleTtlMs ?? DEFAULT_LAYA_IDLE_TTL_MS),
     modelDir: modelDir === undefined || modelDir.trim() === '' ? undefined : modelDir,
     executionProviders,
     threads: threads ?? 0,

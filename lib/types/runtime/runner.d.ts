@@ -183,8 +183,8 @@ export declare class DecisionRuntime {
      *
      * Environments are not rebuilt: their adapters hold per-observation state
      * (a browser index inventory, an accessibility merge base) that a live swap
-     * would silently invalidate. Environment toggles therefore take effect on the
-     * next start, which is what the settings panel reports.
+     * would silently invalidate. Explicit environment configuration therefore
+     * takes effect on the next start.
      */
     reconfigure(overrides: RuntimeConfigInput): void;
     /**

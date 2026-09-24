@@ -124,6 +124,11 @@ check('the settings descriptor marks live fields', ours.applies === 'live', Stri
 const value = ours.value
 check('the resolved value shows the composition config', value?.defaultProvider === 'laya' && value?.runtime?.confidenceThreshold === 0.55,
   `defaultProvider=${value?.defaultProvider} threshold=${value?.runtime?.confidenceThreshold}`)
+const initialHealth = await ctx.decisionEngine.health()
+check('Laya loads on use and releases after ten idle minutes by default',
+  value?.providers?.laya?.autoLoad === false
+    && value?.providers?.laya?.idleTtlMs === 600_000
+    && initialHealth.providers.laya?.details?.idleTtlMs === 600_000)
 check('nothing is marked as a user override yet', ours.user === undefined || Object.keys(ours.user ?? {}).length === 0)
 
 // --- 4. a write reaches the live engine -----------------------------------
@@ -139,6 +144,19 @@ const rereadList = Array.isArray(reread) ? reread : reread.namespaces ?? []
 const rereadOurs = rereadList.find(entry => entry.ns === SETTINGS_NAMESPACE)
 check('the panel reads the written value back', rereadOurs?.value?.runtime?.confidenceThreshold === 0.2, String(rereadOurs?.value?.runtime?.confidenceThreshold))
 check('the changed field is marked as a user override', JSON.stringify(rereadOurs?.user ?? {}).includes('confidenceThreshold'))
+
+// A second registered model is selectable through the same settings write.
+const removeAlternative = ctx.decisionEngine.providers.register({
+  id: 'alternative',
+  capabilities: ['choice'],
+  decide: async () => ({ provider: 'alternative', mode: 'choice', selected: 'a', latencyMs: 0 }),
+})
+await ctx.settings.update(SETTINGS_NAMESPACE, { defaultProvider: 'alternative' })
+const switched = await ctx.decisionEngine.decide({ state: 'ready', candidates: [{ id: 'a', description: 'A' }, { id: 'b', description: 'B' }] })
+check('a saved default switches live routing to another registered model',
+  switched.provider === 'alternative' && (await ctx.decisionEngine.health()).defaultProvider === 'alternative')
+await ctx.settings.update(SETTINGS_NAMESPACE, { defaultProvider: 'laya' })
+removeAlternative()
 
 // --- 5. a bad value is refused, not stored --------------------------------
 let refused = false

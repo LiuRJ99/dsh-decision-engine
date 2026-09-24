@@ -182,8 +182,10 @@ in `providers/laya/modes.ts` and the global floor starts applying to it.
 
 ## Configuration
 
-Common options live in the first-level **Settings → Decision Engine** page.
-Provider, model residency, and execution budgets are separate collapsible groups.
+The first-level **Settings → Decision Engine** page selects the default Provider ID.
+Only Laya ships built in; other decision models need their own registered IDs.
+Each decision call can override the default with its `provider` argument.
+Model paths, residency and execution budgets stay in deployment or task options.
 Browser and computer actions use the Host's capability gate when a task selects
 those environments; there is no environment switch in this page.
 
@@ -198,6 +200,7 @@ decisionEngine:
       modelDir: /path/to/exported/bundle
       device: cpu       # or coreml / cuda / dml / wasm, or a comma-separated list
       threads: 0
+      # By default it loads on first use and releases after ten idle minutes.
 
   runtime:
     confidenceThreshold: 0.55   # NORMALIZED confidence only; see above

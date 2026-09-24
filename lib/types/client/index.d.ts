@@ -14,7 +14,7 @@ interface SettingsScope {
 interface SettingsOp {
     op: 'set' | 'unset';
     path: string[];
-    value?: string | number | boolean;
+    value?: string;
 }
 interface ClientContext {
     settingsScope: {
@@ -28,10 +28,9 @@ interface ClientContext {
     };
     effect(install: () => () => void, label: string): void;
 }
-interface SectionProps {
+export declare function DecisionSettingsSection({ scope }: {
     scope: SettingsScope;
-}
-export declare function DecisionSettingsSection({ scope }: SectionProps): import("react/jsx-runtime").JSX.Element;
+}): import("react/jsx-runtime").JSX.Element;
 export declare const inject: string[];
 export declare function apply(ctx: ClientContext): void;
 export {};

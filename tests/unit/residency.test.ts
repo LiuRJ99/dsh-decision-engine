@@ -18,7 +18,7 @@ import { strict as assert } from 'node:assert'
 import { describe, it } from 'node:test'
 import { DecisionEngine } from '../../src/core/decision-engine.ts'
 import { DecisionRuntime } from '../../src/runtime/runner.ts'
-import { resolveLayaConfig } from '../../src/providers/laya/config.ts'
+import { DEFAULT_LAYA_IDLE_TTL_MS, resolveLayaConfig } from '../../src/providers/laya/config.ts'
 import { LayaDecisionProvider } from '../../src/providers/laya/provider.ts'
 import { LayaRuntime } from '../../src/providers/laya/runtime.ts'
 import type { LayaInstance } from '../../src/providers/laya/runtime.ts'
@@ -76,8 +76,9 @@ describe('when the model loads', () => {
     await runtime.close()
   })
 
-  it('takes autoLoad from the provider config, so the settings panel controls it', () => {
+  it('loads on first use and releases after ten idle minutes by default', () => {
     assert.equal(resolveLayaConfig({}).autoLoad, false, 'the default must not load a 1.6 GB bundle at startup')
+    assert.equal(resolveLayaConfig({}).idleTtlMs, DEFAULT_LAYA_IDLE_TTL_MS)
     assert.equal(resolveLayaConfig({ autoLoad: true }).autoLoad, true)
     // A provider built without an explicit option inherits the config value.
     const provider = new LayaDecisionProvider({ config: { autoLoad: true }, instance: countingInstance().instance })
@@ -96,11 +97,11 @@ describe('when the model loads', () => {
 describe('idle release', () => {
   it('keeps the session resident when the TTL is 0', async () => {
     const counter = countingInstance()
-    const runtime = new LayaRuntime({ instance: counter.instance })
+    const runtime = new LayaRuntime({ instance: counter.instance, idleTtlMs: 0 })
     assert.equal(runtime.idleTtlMs, 0)
     await runtime.systemOne({ a: 1 }, {})
     await new Promise(resolve => setTimeout(resolve, 30))
-    assert.equal(counter.closes(), 0, 'the default must not release the session')
+    assert.equal(counter.closes(), 0, 'an explicit zero TTL must keep the session resident')
     await runtime.close()
   })
 

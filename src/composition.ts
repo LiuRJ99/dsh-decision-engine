@@ -32,7 +32,7 @@ import { BrowserEnvironmentAdapter, type BrowserActionCandidate } from './enviro
 import { ComputerEnvironmentAdapter, type ComputerAdapterConfig, type ComputerSeam } from './environments/computer/adapter.ts'
 import type { ToolDispatcher } from './environments/dispatch.ts'
 import type { DecisionRuntime, RuntimeConfigInput } from './runtime/runner.ts'
-import type { LayaConfig } from './providers/laya/config.ts'
+import { DEFAULT_LAYA_IDLE_TTL_MS, type LayaConfig } from './providers/laya/config.ts'
 import type { DecisionEngineService } from './service.ts'
 
 /**
@@ -169,8 +169,8 @@ export const Config: z<Config> = z.object({
       autoLoad: z.boolean().default(false).description(
         'Load the model at startup instead of on the first decision. Off by default: a session pins the weights (about 1.6 GB) for as long as it is open.',
       ),
-      idleTtlMs: z.number().default(0).description(
-        'Release the model after this many milliseconds without a decision; the next decision reloads it. 0 keeps it resident for the process lifetime.',
+      idleTtlMs: z.number().default(DEFAULT_LAYA_IDLE_TTL_MS).description(
+        'Release the model after this many milliseconds without a decision; defaults to ten minutes. 0 keeps it resident for the process lifetime.',
       ),
       required: z.boolean().default(false).description('Treat an unavailable model as a hard failure instead of reporting the provider as degraded.'),
       strictCandidates: z.boolean().default(true).description('Refuse a model answer that names an option which was not on the ballot.'),
