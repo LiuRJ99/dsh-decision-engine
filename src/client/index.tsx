@@ -1,4 +1,4 @@
-/** Decision Engine card inside Settings → Plugins → Plugin configuration. */
+/** Decision Engine page in the first-level Settings sidebar. */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 
 const NAMESPACE = 'decision-engine'
@@ -47,7 +47,7 @@ function configuredIds(snapshot: SettingsSnapshot): string[] {
 }
 
 const STYLE = `
-.dsh-de-card{list-style:none;border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:12px;background:var(--dsw-alias-bg-layer-3,#fff);overflow:hidden;color:inherit}
+.dsh-de-card{border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:12px;background:var(--dsw-alias-bg-layer-3,#fff);overflow:hidden;color:inherit}
 .dsh-de-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .dsh-de-head:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#4c78ff);outline-offset:-2px}.dsh-de-head-text{display:grid;gap:3px}
 .dsh-de-title{font-size:15px;font-weight:600}.dsh-de-subtitle,.dsh-de-hint,.dsh-de-status{font-size:12px;line-height:1.5;color:var(--dsw-alias-label-tertiary,#747b86)}
@@ -65,7 +65,7 @@ export function DecisionSettingsCard({ scope }: { scope: SettingsScope }) {
   const subscribe = useCallback((listener: () => void) => scope.subscribe(listener), [scope])
   const getSnapshot = useCallback(() => scope.getSnapshot(), [scope])
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const [catalog, setCatalog] = useState<Catalog>({ status: 'idle', ids: [] })
   const [refresh, setRefresh] = useState(0)
   const [draft, setDraft] = useState<Draft | undefined>()
@@ -128,7 +128,7 @@ export function DecisionSettingsCard({ scope }: { scope: SettingsScope }) {
   }
 
   if (snapshot.status === 'unavailable') return null
-  return <li className="dsh-de-card">
+  return <section className="dsh-de-card">
     <button type="button" className="dsh-de-head" aria-expanded={open} onClick={() => setOpen(previous => !previous)}>
       <span className="dsh-de-head-text">
         <span className="dsh-de-title">决策引擎</span>
@@ -160,7 +160,7 @@ export function DecisionSettingsCard({ scope }: { scope: SettingsScope }) {
         </div>
       </>}
     </form>}
-  </li>
+  </section>
 }
 
 export const inject = ['slots', 'configForms']
@@ -174,8 +174,8 @@ export function apply(ctx: ClientContext): void {
     document.head.appendChild(style)
     return () => style.remove()
   }, 'decision-engine settings styles')
-  ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
-    name: 'settings.plugins.tab',
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
     id: NAMESPACE,
     order: 30,
     label: '决策引擎',

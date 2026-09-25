@@ -197,7 +197,7 @@ Laya provider 报告 `provider_raw`，这是**测量结论**而不是保守选�
 ## 配置
 
 配置有三个来源，优先级从低到高：schema 默认值 → `cordis.patch.yml` 的 bundle 行 →
-设置面板写入的用户层。**默认模型可在 DSH Web「设置 → 插件 → 插件配置」中调整**（见下节），
+设置面板写入的用户层。**默认模型可在 DSH Web「设置 → 决策引擎」中调整**（见下节），
 不必手改 YAML。
 
 ```yaml
@@ -290,8 +290,8 @@ v0.3.0 起可在 `decision_run` / `decision_decide` 的 `browser` 参数中临�
 
 ### 通过内置设置面板配置
 
-Host 注册 `decision-engine` settings 命名空间，Web 客户端在「设置 → 插件 →
-插件配置」提供「决策引擎」卡片，用下拉框选择默认 Provider。选项来自运行中
+Host 注册 `decision-engine` settings 命名空间，Web 客户端在「设置 → 决策引擎」
+提供设置页，用下拉框选择默认 Provider。选项来自运行中
 已启用的 Provider 注册表；当前内置的只有 `laya`，其他决策模型须先以独立的
 Provider ID 注册。单次 `decision_decide` / `decision_run` 可用 `provider` 参数临时覆盖默认值。
 模型目录、驻留策略与循环预算不占据前台；高级部署仍可通过配置文件设置，
