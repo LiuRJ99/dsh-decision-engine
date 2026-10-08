@@ -64,13 +64,36 @@ async function httpGame(options: { over?: boolean; rejectStale?: boolean; change
 }
 
 describe('independent task takeover', () => {
+  it('registers the provider catalog when the Web server mounts after the plugin', async () => {
+    const services = new Map<string, unknown>()
+    const routes: Array<{ path: string }> = []
+    let mountWeb: (() => void) | undefined
+    const ctx = {
+      tools: { register: () => () => {} },
+      get: (name: string) => services.get(name),
+      provide: (name: string, value: unknown) => services.set(name, value),
+      effect: (factory: () => unknown) => { factory() },
+      inject: (deps: string[], callback: (context: unknown) => unknown) => {
+        assert.deepEqual(deps, ['webServer'])
+        mountWeb = () => { callback(ctx) }
+      },
+      systemPrompt: { section: () => {} },
+    }
+    apply(ctx as never, { providers: { laya: { enabled: false } } })
+    assert.equal(routes.length, 0)
+    services.set('webServer', { register: (route: { path: string }) => { routes.push(route); return () => {} } })
+    mountWeb!()
+    assert.equal(routes[0]?.path, '/plugins/dsh-decision-engine/providers')
+    await (services.get('decisionEngine') as DecisionEngineService).dispose()
+  })
+
   it('host plugin accepts a saved external default before its provider mounts', async () => {
     const services = new Map<string, unknown>()
     const ctx = {
       tools: { register: () => () => {} },
       get: (name: string) => services.get(name),
       provide: (name: string, value: unknown) => services.set(name, value),
-      effect: () => {}, systemPrompt: { section: () => {} },
+      effect: () => {}, inject: () => {}, systemPrompt: { section: () => {} },
     }
     apply(ctx as never, { defaultProvider: 'test-policy', providers: { laya: { enabled: false } } })
     const service = services.get('decisionEngine') as DecisionEngineService

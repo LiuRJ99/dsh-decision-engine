@@ -155,15 +155,15 @@ export function apply(ctx: Context, config: Config | Volatile<Config> = {}): voi
   })
   // Web settings reads the live registry so its model selector includes
   // providers registered by other plugins after this composition was built.
-  const webServer = ctx.get('webServer' as never) as unknown as {
-    register(route: { kind: 'exact'; path: string; handler(req: IncomingMessage, res: ServerResponse): void }): () => void
-  } | undefined
-  if (webServer !== undefined) {
-    ctx.effect(() => webServer.register({
+  ctx.inject(['webServer' as never], (webCtx) => {
+    const webServer = webCtx.get('webServer' as never) as unknown as {
+      register(route: { kind: 'exact'; path: string; handler(req: IncomingMessage, res: ServerResponse): void }): () => void
+    }
+    webCtx.effect(() => webServer.register({
       kind: 'exact', path: PROVIDER_CATALOG_ROUTE,
       handler: (req, res) => serveProviderCatalog(req, res, () => composition.providers.enabledIds()),
     }), 'decision-engine provider catalog route')
-  }
+  })
 
   // Publish the service on this context. `ctx.provide` owns the disposer, so
   // unloading the plugin (or the preset scope that mounted it) removes the
