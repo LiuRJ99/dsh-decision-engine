@@ -39,6 +39,7 @@ export interface RunTaskInput {
 }
 
 export async function executeRunTask(input: RunTaskInput, service: DecisionEngineService, signal?: AbortSignal): Promise<TaskOutcome> {
+  if (service.executionMode === 'advice-only') throw new DecisionError('invalid_request', 'Advice-only mode cannot take over tasks. Use decision_decide with execute: false.')
   if (typeof input.objective !== 'string' || input.objective.trim() === '') throw new DecisionError('invalid_request', 'A task needs a non-empty objective.')
   if ((input.environment === undefined) === (input.endpoint === undefined)) throw new DecisionError('invalid_request', 'Pass exactly one of environment or endpoint.')
   if (input.maxDurationMs !== undefined && input.maxDurationMs > 1_800_000) throw new DecisionError('invalid_request', 'DSH tasks may run for at most 30 minutes per call.')

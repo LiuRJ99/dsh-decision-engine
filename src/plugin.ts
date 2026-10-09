@@ -128,6 +128,12 @@ export function apply(ctx: Context, config: Config | Volatile<Config> = {}): voi
     const settingsValue = ctx.get('settings')?.describe().find(entry => entry.ns === SETTINGS_NAMESPACE)?.value
     return (settingsValue ?? ('get' in config ? config.get() : config)) as Config
   }
+  // Keep the control skill discoverable when disabled, so Lazy Gate can report
+  // "plugin disabled" rather than a misleading registration failure.
+  const skills = ctx.get('skills')
+  if (skills !== undefined) {
+    ctx.effect(() => (skills as { register(skill: unknown): () => void }).register(DECISION_CONTROL_SKILL), 'decision-control skill')
+  }
   if (entryConfig().enabled === false) return
 
   const execution = new AsyncLocalStorage<ToolRunContext>()
@@ -176,11 +182,8 @@ export function apply(ctx: Context, config: Config | Volatile<Config> = {}): voi
   // Both tools are scoped to the calling context, so a preset that mounts
   // this plugin in one agent scope exposes them there only.
   ctx.tools.register(defineDecideTool({ service: composition.service }, scope))
-  ctx.tools.register(defineRunTool(composition.service, scope))
-
-  const skills = ctx.get('skills')
-  if (skills !== undefined) {
-    ctx.effect(() => (skills as { register(skill: unknown): () => void }).register(DECISION_CONTROL_SKILL), 'decision-control skill')
+  if (initialConfig.executionMode !== 'advice-only') {
+    ctx.tools.register(defineRunTool(composition.service, scope))
   }
 
   // Subsequent writes update live routing and budgets. Provider instances and
@@ -203,6 +206,7 @@ export function apply(ctx: Context, config: Config | Volatile<Config> = {}): voi
         if (resolved.runtime?.confidenceThreshold !== undefined) engineConfig.confidenceThreshold = resolved.runtime.confidenceThreshold
         if (resolved.runtime?.observeTimeoutMs !== undefined) engineConfig.timeoutMs = resolved.runtime.observeTimeoutMs
         composition.setDefaultProvider(resolved.defaultProvider)
+        composition.setExecutionMode(resolved.executionMode ?? 'execute')
         composition.service.engine.reconfigure(engineConfig)
         if (resolved.runtime !== undefined) composition.service.runtime.reconfigure(resolved.runtime)
       } catch (error) {

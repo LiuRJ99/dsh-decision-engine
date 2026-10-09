@@ -37,6 +37,8 @@ export interface DecisionEngineHealth {
  * What `ctx.decisionEngine` offers.
  */
 export interface DecisionEngineService {
+  /** Undefined on older integrations means the original execute-capable mode. */
+  readonly executionMode?: 'advice-only' | 'execute'
   /** The engine. `decide(request)` is the one entry point. */
   readonly engine: DecisionEngine
   /** Provider membership and lookup. */

@@ -16,6 +16,7 @@ import { createMapDispatcher } from '../../src/environments/dispatch.ts'
 import { CustomEnvironmentAdapter } from '../../src/environments/custom/adapter.ts'
 import { DecisionError } from '../../src/core/errors.ts'
 import { executeDecide, executionModeOf, renderDecideOutput } from '../../src/tools/decide-logic.ts'
+import { executeRunTask } from '../../src/tools/decision-run.ts'
 import { constantProvider, ScriptedProvider } from '../helpers.ts'
 
 /** The documented minimal request from the specification. */
@@ -61,6 +62,29 @@ function composition(options: { decided?: string; config?: Config; extra?: Param
 }
 
 describe('decision_decide without an environment', () => {
+  it('advice-only permits suggestions but refuses execution and task takeover before dispatch', async () => {
+    const created = composition({ config: { executionMode: 'advice-only' } })
+    let actions = 0
+    created.environments.register(new CustomEnvironmentAdapter({ id: 'guarded',
+      observe: async () => ({ main: 'ready' }),
+      candidates: () => MINIMAL.candidates,
+      execute: async () => { actions++; return { ok: true } },
+    }))
+    try {
+      assert.equal((await executeDecide(MINIMAL, { service: created.service })).status, 'decided')
+      for (const execute of [true, 'loop'] as const) {
+        await assert.rejects(executeDecide({ ...MINIMAL, environment: 'guarded', execute, allowRisky: true }, { service: created.service }), /Advice-only/)
+      }
+      await assert.rejects(executeRunTask({ objective: 'run', environment: 'guarded', allowRisky: true }, created.service), /Advice-only/)
+      await assert.rejects(created.service.run({ environment: 'guarded', objective: { description: 'run' }, mode: 'single-step' }), /Advice-only/)
+      await assert.rejects(created.service.runTask({ environment: 'guarded', objective: { description: 'run' } }), /Advice-only/)
+      assert.equal(actions, 0)
+      assert.equal(created.provider.calls.length, 1)
+      created.setExecutionMode('execute')
+      assert.equal((await executeDecide({ ...MINIMAL, execute: true, environment: 'guarded' }, { service: created.service })).status, 'executed')
+      assert.equal(actions, 1)
+    } finally { await created.dispose() }
+  })
   it('answers the documented minimal request', async () => {
     const { service } = composition()
     const output = await executeDecide(MINIMAL, { service })

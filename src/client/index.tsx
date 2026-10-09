@@ -94,6 +94,8 @@ export function DecisionSettingsCard({ scope }: { scope: SettingsScope }) {
   const shown = draft?.kind === 'set' ? draft.value : draft?.kind === 'unset' ? base : saved
   const value = typeof shown === 'string' ? shown : ''
   const overridden = field(snapshot.user, 'defaultProvider') !== undefined
+  const enabled = field(snapshot.value, 'enabled') !== false
+  const executionMode = field(snapshot.value, 'executionMode') === 'advice-only' ? 'advice-only' : 'execute'
   const available = catalog.status === 'ready' ? catalog.ids : configuredIds(snapshot)
   const options = [...new Set([...available, ...(value ? [value] : [])])]
 
@@ -126,6 +128,16 @@ export function DecisionSettingsCard({ scope }: { scope: SettingsScope }) {
       setSaving(false)
     }
   }
+  const changeMode = async (value: string): Promise<void> => {
+    if (saving || !snapshot.writable) return
+    setSaving(true)
+    try {
+      if (!await scope.mutate([{ op: 'set', path: ['executionMode'], value }], snapshot.revision)) throw new Error('settings write refused')
+      setMessage('运行模式已保存，执行限制立即生效；重启后刷新任务工具列表。')
+    } catch {
+      setMessage('保存未生效。请刷新设置后重试。')
+    } finally { setSaving(false) }
+  }
 
   if (snapshot.status === 'unavailable') return null
   return <section className="dsh-de-card">
@@ -139,6 +151,16 @@ export function DecisionSettingsCard({ scope }: { scope: SettingsScope }) {
     {open && <form className="dsh-de-body" onSubmit={event => { void save(event) }}>
       {snapshot.status === 'loading' && <p className="dsh-de-hint">正在读取设置…</p>}
       {snapshot.status === 'ready' && <>
+        <p className="dsh-de-status" role="status">{!enabled ? '插件已关闭；决策工具未注册。启用后请调用 /decision-control。'
+          : executionMode === 'advice-only' ? '已启用 · 仅建议：返回候选建议，不执行动作，不接管任务。' : '已启用 · 可执行动作：仍受会话权限与门禁约束。'}</p>
+        <div className="dsh-de-field">
+          <label className="dsh-de-label" htmlFor="dsh-de-mode">运行模式</label>
+          <select id="dsh-de-mode" className="dsh-de-select" value={executionMode} disabled={!snapshot.writable || saving}
+            onChange={event => { void changeMode(event.target.value) }}>
+            <option value="advice-only">仅建议</option><option value="execute">允许执行</option>
+          </select>
+          <span className="dsh-de-hint">建议仍需核对；模型理解的约束不能替代程序校验和权限审批。</span>
+        </div>
         <div className="dsh-de-field">
           <label className="dsh-de-label" htmlFor="dsh-de-provider">默认决策模型</label>
           <select id="dsh-de-provider" className="dsh-de-select" value={value} disabled={!snapshot.writable || saving || options.length === 0}

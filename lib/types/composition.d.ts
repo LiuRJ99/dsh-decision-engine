@@ -57,6 +57,8 @@ export type { ProviderSpec } from './assembly.ts';
 export interface Config {
     /** Whether the plugin wires anything at all. Defaults to true. */
     enabled?: boolean;
+    /** Advice-only permits decisions and observations but never executes actions. */
+    executionMode?: 'advice-only' | 'execute';
     /** Provider id used when a request does not name one. Defaults to the first enabled provider. */
     defaultProvider?: string;
     /**
@@ -166,6 +168,7 @@ export interface DecisionEngineComposition {
     telemetryRecords: DecisionTelemetry[];
     /** Repoint the active default and retain a disabled requested id for health. */
     setDefaultProvider(id?: string): void;
+    setExecutionMode(mode: 'advice-only' | 'execute'): void;
     dispose(): Promise<void>;
 }
 //# sourceMappingURL=composition.d.ts.map

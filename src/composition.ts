@@ -63,6 +63,8 @@ export type { ProviderSpec } from './assembly.ts'
 export interface Config {
   /** Whether the plugin wires anything at all. Defaults to true. */
   enabled?: boolean
+  /** Advice-only permits decisions and observations but never executes actions. */
+  executionMode?: 'advice-only' | 'execute'
   /** Provider id used when a request does not name one. Defaults to the first enabled provider. */
   defaultProvider?: string
   /**
@@ -149,6 +151,9 @@ export type { BrowserActionCandidate }
 export const Config: z<Config> = z.object({
   enabled: z.boolean().default(true).description(
     'Whether the decision layer is active at all. Turning this off removes the tool and stops answering decisions.',
+  ),
+  executionMode: z.union([z.const('advice-only'), z.const('execute')]).default('execute').description(
+    'advice-only returns suggestions without executing actions or taking over tasks. Changes apply immediately.',
   ),
   defaultProvider: z.string().description(
     'Provider id used when a request does not name one (for example "laya"). Omit it to use the first enabled provider.',
@@ -317,11 +322,13 @@ export function createDecisionEngineComposition(options: {
     requestedDefault = requested
   }
 
+  let executionMode = config.executionMode ?? 'execute'
   const service: DecisionEngineService = {
     engine,
     providers,
     environments,
     runtime,
+    get executionMode() { return executionMode },
     // Getters, so a settings change is visible immediately instead of leaving a
     // stale snapshot behind (the engine and runtime are reconfigured live).
     get confidenceThreshold(): number {
@@ -331,8 +338,12 @@ export function createDecisionEngineComposition(options: {
       return runtime.resolveConfig()
     },
     decide: (request, decideOptions) => engine.decide(request, decideOptions),
-    run: runOptions => runtime.run(runOptions),
-    runTask: taskOptions => runtime.runTask(taskOptions),
+    run: runOptions => executionMode === 'advice-only' && (runOptions.mode ?? 'decision-only') !== 'decision-only'
+      ? Promise.reject(new DecisionError('invalid_request', 'Advice-only mode cannot execute actions. Use execute: false.'))
+      : runtime.run(runOptions),
+    runTask: taskOptions => executionMode === 'advice-only'
+      ? Promise.reject(new DecisionError('invalid_request', 'Advice-only mode cannot take over tasks. Use decision_decide with execute: false.'))
+      : runtime.runTask(taskOptions),
     isCapabilityUnlocked: capability => options.readCapabilityGate?.(capability),
     health: () => aggregateDecisionHealth({ providers, environments, records,
       ...requestedDefault === undefined ? {} : { requestedDefault } }),
@@ -351,6 +362,7 @@ export function createDecisionEngineComposition(options: {
     runtime,
     telemetryRecords: records,
     setDefaultProvider,
+    setExecutionMode: mode => { executionMode = mode },
     dispose: () => service.dispose(),
   }
 }
@@ -365,5 +377,6 @@ export interface DecisionEngineComposition {
   telemetryRecords: DecisionTelemetry[]
   /** Repoint the active default and retain a disabled requested id for health. */
   setDefaultProvider(id?: string): void
+  setExecutionMode(mode: 'advice-only' | 'execute'): void
   dispose(): Promise<void>
 }

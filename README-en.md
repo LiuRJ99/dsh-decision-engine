@@ -463,3 +463,7 @@ src/
 ## License
 
 MIT
+
+## Advice-only mode
+
+Set `executionMode: advice-only` to return suggestions and previews while rejecting action execution and task takeover, including requests with `allowRisky: true`. On startup this mode omits `decision_run`. The default `execute` preserves existing integrations. Changing modes updates execution checks immediately; restart to refresh the task tool catalog. The `/decision-control` skill remains discoverable when disabled so the gate can explain the disabled state, without registering decision tools. Natural-language constraints are model input, not authorization or hard validation.

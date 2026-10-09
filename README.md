@@ -523,3 +523,9 @@ docs/
 ## 许可
 
 MIT
+
+## 仅建议模式
+
+设置 `executionMode: advice-only` 可启用决策建议，但拒绝 `execute: true`、`execute: loop` 和任务接管，即使传入 `allowRisky: true` 也不能改变该限制。启动时不注册 `decision_run`；`decision_decide` 仍可返回候选建议和动作预览。默认 `execute` 保留原有用法。模式修改立即影响执行检查，重启后刷新任务工具列表。
+
+控制技能 `/decision-control` 在插件关闭时仍可被发现，用于显示关闭状态；决策工具仅在 `enabled: true` 时注册。建议内容仍需核对，自然语言 constraints 不是程序权限或硬性校验。

@@ -357,6 +357,9 @@ export function renderDecideOutput(output: DecideToolOutput): string {
 export async function executeDecide(input: DecideToolInput, context: DecideToolContext, signal?: AbortSignal): Promise<DecideToolOutput> {
   const { service } = context
   const mode = executionModeOf(input.execute)
+  if (service.executionMode === 'advice-only' && mode !== 'decision-only') {
+    throw new DecisionError('invalid_request', 'Advice-only mode cannot execute actions. Use execute: false.')
+  }
   const debug = input.debug === true
 
   const environmentId = typeof input.environment === 'string' && input.environment !== '' ? input.environment : undefined
