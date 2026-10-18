@@ -1,3 +1,9 @@
+## 0.4.20 — 2026-10-18
+
+Align Host/framework peers and the build SDK with 0.2.1-rc.1 while retaining advice-only mode, capability diagnostics and Browser/Computer adapters.
+
+Compatibility is restricted to `0.2.0-rc.2 || 0.2.1-rc.1`; no alpha or later Host is implied.
+
 # Changelog
 
 ## [0.4.18] - 2026-10-08
