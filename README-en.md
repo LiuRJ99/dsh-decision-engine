@@ -467,3 +467,7 @@ MIT
 ## Advice-only mode
 
 Set `executionMode: advice-only` to return suggestions and previews while rejecting action execution and task takeover, including requests with `allowRisky: true`. On startup this mode omits `decision_run`. The default `execute` preserves existing integrations. Changing modes updates execution checks immediately; restart to refresh the task tool catalog. The `/decision-control` skill remains discoverable when disabled so the gate can explain the disabled state, without registering decision tools. Natural-language constraints are model input, not authorization or hard validation.
+
+## Host compatibility policy
+
+The minimum Host requirement is `>=0.2.0-rc.2`. Newer DSH versions remain eligible by default; narrow the range or adapt the implementation only when an incompatibility is confirmed. Do not maintain an allowlist of individual RCs. Fixed build SDK versions describe build inputs, not the allowed Host versions. Installation sources stay pinned to releases/tags. Qualification evidence is recorded separately: an eligible future Host is not automatically a tested Host.

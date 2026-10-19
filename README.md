@@ -529,3 +529,7 @@ MIT
 设置 `executionMode: advice-only` 可启用决策建议，但拒绝 `execute: true`、`execute: loop` 和任务接管，即使传入 `allowRisky: true` 也不能改变该限制。启动时不注册 `decision_run`；`decision_decide` 仍可返回候选建议和动作预览。默认 `execute` 保留原有用法。模式修改立即影响执行检查，重启后刷新任务工具列表。
 
 控制技能 `/decision-control` 在插件关闭时仍可被发现，用于显示关闭状态；决策工具仅在 `enabled: true` 时注册。建议内容仍需核对，自然语言 constraints 不是程序权限或硬性校验。
+
+## Host 兼容策略
+
+Host 最低要求为 `>=0.2.0-rc.2`。较新的 DSH 版本默认延续兼容，只有确认存在不兼容时才增加排除范围或调整实现；不按每个 RC 维护白名单。固定的构建 SDK 版本只记录构建输入，不限制 Host 到同一个版本。安装来源仍固定 release/tag；实际验证记录与兼容范围分开，范围覆盖不等于每个未来版本都已经实测。
